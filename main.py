@@ -48,6 +48,7 @@ def sim_mdp_setup_1():
     mdp_sim.add_transition(4, 'a', 6, 0.1)
     mdp_sim.add_transition(4, 'a', 1, 0.4)
     mdp_sim.add_transition(4, 'd', 1, 0.9999)
+    # mdp_sim.add_transition(4, 'd', 1, 1)
     mdp_sim.add_transition(4, 'd', 5, 0.0001)
     mdp_sim.add_transition(5, 'a', 5, 1)
     mdp_sim.add_transition(6, 'a', 6, 1)
@@ -79,10 +80,10 @@ def example_simple_mdp():
     learner = LTLReachabilityLearner(mdp_simulator=mdp_sim)
 
     print("================= Starting Learning Process =================")
-    history_plot_path = "./plots/test_3_state.png"
-    learner.learn(history_plot_path)
+    analysis_path = "./results/example_analysis"
     
-    learner.print_summary(true_confidence_error=0.0001, true_p_min=0.3)
+    learner.learn(analysis_path)
+    learner.print_summary(true_confidence_error=0.0001, true_p_min=0.3, analysis_dir=analysis_path)
 
 def ij3_jani_mdp():
     """
@@ -110,7 +111,7 @@ def ij3_jani_mdp():
     analysis_path = "./results/ij3_analysis"
     learner.learn(analysis_path)
     
-    learner.print_summary(true_confidence_error=0.01, true_p_min=0.5, output_path="./logs/ij3_learning_log.json")
+    learner.print_summary(true_confidence_error=0.01, true_p_min=0.5, output_path="./logs/ij3_learning_log.json", analysis_dir=analysis_path)
 
 def ij10_jani_mdp():
     """
@@ -138,15 +139,15 @@ def ij10_jani_mdp():
     analysis_path = "./results/ij10_analysis"
     learner.learn(analysis_path)
     
-    learner.print_summary(true_confidence_error=0.01, true_p_min=0.5, output_path="./logs/ij10_learning_log.json")
+    learner.print_summary(true_confidence_error=0.01, true_p_min=0.5, output_path="./logs/ij10_learning_log.json", analysis_dir=analysis_path)
 
 if __name__ == "__main__":
     # Set random seed for reproducibility
     np.random.seed(42)
     
     # Run examples
-    # example_simple_mdp()
-    ij3_jani_mdp()
+    example_simple_mdp()
+    # ij10_jani_mdp()
     
     print("\n" + "="*60)
     print("All examples completed!")

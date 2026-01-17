@@ -89,7 +89,6 @@ def _enumerate_all_states(jani_data: Dict) -> Set[Tuple]:
     for var in variables:
         var_name = var["name"]
         var_type = var.get("type", {})
-        # if (var_type == "")
         if var_type.get("kind") == "bounded":
             # NOTE: We will need to consider the variable "type" for the proper implementation.
             lower = var_type.get("lower-bound", 0)
@@ -167,7 +166,6 @@ def _extract_goal_states(jani_data: Dict, all_states: Set[Tuple]) -> Set[Tuple]:
             # The goal condition is the right side of the "U" (Until) operator
             values_exp = expression.get("values", {}).get("exp")
             if values_exp and values_exp.get("op") == "U":
-                # TODO: Cross-check with Dr. Bansal if it is correct to assume that goal states follow the condition: "True U <condition>".
                 # For "true U condition", we want the right side which is the goal condition
                 goal_condition = values_exp.get("right")
         

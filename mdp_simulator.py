@@ -15,6 +15,11 @@ class MDPSimulator:
     def step(self, state: Any, action: Any) -> Tuple[Any, float]:
         """
         Execute one step of the MDP.
+
+        Args:
+            state: Current state
+            action: Action to take
+
         Returns: (next_state, reward)
         """
         assert state in self.gt_mdp.states, f"State {state} is not in the given MDP."
@@ -23,11 +28,10 @@ class MDPSimulator:
             raise ValueError(f"Invalid state-action pair: ({state}, {action})")
         
         transitions = self.gt_mdp.get_transition_probabilities(state, action)
-        # given this transitions dictionary, sample next state according to the probabilities
+        # Given this transitions dictionary, sample next state according to the probabilities
         next_states = list(transitions.keys())
         probabilities = list(transitions.values())
         assert sum(probabilities) == 1.0, f"Simulator should have true probabilities that sum up to 1 for ({state}, {action})."
-        # next_state = np.random.choice(next_states, p=probabilities)
         sampled_index = np.random.choice(len(next_states), p=probabilities)
         next_state = next_states[sampled_index]
         reward = (next_state in self.gt_mdp.goal_states)

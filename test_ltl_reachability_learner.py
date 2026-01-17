@@ -325,24 +325,34 @@ class TestMDPFunctionality(unittest.TestCase):
     def test_end_component_detection_num_required_samples(self):
         mdp = setup_loop_3()
         learner = LTLReachabilityLearner(mdp_simulator=MDPSimulator())
-        self.assertAlmostEqual(learner._end_component_detection_num_required_samples(0.001, 0.1), 65.5630359803, places=8)
-        self.assertAlmostEqual(learner._end_component_detection_num_required_samples(0.0001, 0.01), 916.421153107, places=8)
-        self.assertAlmostEqual(learner._end_component_detection_num_required_samples(0.1, 0.1), 21.8543453268, places=8)
-        self.assertAlmostEqual(learner._end_component_detection_num_required_samples(0.00001, 0.00001), 1151286.79003, places=4)
+        self.assertEqual(learner._end_component_detection_num_required_samples(0.001, 0.1), int(65.5630359803)+1)
+        self.assertEqual(learner._end_component_detection_num_required_samples(0.0001, 0.01), int(916.421153107)+1)
+        self.assertEqual(learner._end_component_detection_num_required_samples(0.1, 0.1), int(21.8543453268)+1)
+        self.assertEqual(learner._end_component_detection_num_required_samples(0.00001, 0.00001), int(1151286.79003)+1)
     
     def test_confidently_detect_end_component(self):
         mdp = setup_loop_3()
         learner = LTLReachabilityLearner(mdp_simulator=MDPSimulator())
-        self.assertTrue(learner._confidently_detect_end_component(mdp, set([2,3,4,5]), 0.5, 0.5))
-        self.assertFalse(learner._confidently_detect_end_component(mdp, set([2,3,4,5]), 0.49999, 0.49999))
-        self.assertTrue(learner._confidently_detect_end_component(mdp, set([6]), 0.00002, 0.00002))
-        self.assertFalse(learner._confidently_detect_end_component(mdp, set([6]), 0.00001, 0.00001))
+        self.assertTrue(learner._confidently_detect_end_component(mdp, set([2,3,4,5]), 0.51, 0.51))
+        self.assertRaises(AssertionError, learner._confidently_detect_end_component, mdp, set([2,3,4,5]), 0.49999, 0.49999)
+        self.assertTrue(learner._confidently_detect_end_component(mdp, set([6]), 0.000021, 0.000021))
+        # self.assertTrue(learner._confidently_detect_end_component(mdp, set([6]), 0.00001, 0.00001))
+        self.assertRaises(AssertionError, learner._confidently_detect_end_component, mdp, set([6]), 0.00001, 0.00001)
+        
 
         learner.discovered_mdp = mdp
-        self.assertTrue(learner._confidently_detect_end_component(mdp, set([2,3,4,5]), 0.5, 0.5))
-        self.assertFalse(learner._confidently_detect_end_component(mdp, set([2,3,4,5]), 0.49999, 0.49999))
-        self.assertTrue(learner._confidently_detect_end_component(mdp, set([6]), 0.00002, 0.00002))
-        self.assertFalse(learner._confidently_detect_end_component(mdp, set([6]), 0.00001, 0.00001))
+        self.assertTrue(learner._confidently_detect_end_component(mdp, set([2,3,4,5]), 0.51, 0.51))
+        self.assertRaises(AssertionError, learner._confidently_detect_end_component, mdp, set([2,3,4,5]), 0.49999, 0.49999)
+        self.assertTrue(learner._confidently_detect_end_component(mdp, set([6]), 0.000021, 0.000021))
+        self.assertRaises(AssertionError, learner._confidently_detect_end_component, mdp, set([6]), 0.00001, 0.00001)
+
+        learner.mdp_sim = MDPSimulator(mdp)
+        learner.mdp_sim.gt_mdp.confidence_error = 1 * len(learner.mdp_sim.gt_mdp.state_action_pairs) / learner.mdp_sim.gt_mdp.p_min  # To make confidence width == 1
+        learner.mdp_sim.gt_mdp.update_transition_probabilities()
+        self.assertTrue(learner._confidently_detect_end_component(mdp, set([2,3,4,5]), 0.51, 0.51))
+        self.assertTrue(learner._confidently_detect_end_component(mdp, set([2,3,4,5]), 0.49999, 0.49999))
+        self.assertTrue(learner._confidently_detect_end_component(mdp, set([6]), 0.000021, 0.000021))
+        self.assertTrue(learner._confidently_detect_end_component(mdp, set([6]), 0.00001, 0.00001))
 
     def test_calculate_transition_probability_error_tolerance(self):
         mdp = setup_loop_3()

@@ -27,6 +27,7 @@ class LTLReachabilityLearner:
         """
         self.discovered_mdp = MDP()  # Partial MDP
         self.mdp_sim = mdp_simulator  # Nests the true MDP
+        self.latest_collapsed_mdp = MDP()  # Last created collapsed MDP after MEC detection - the learned policy can be extracted from this MDP
         self.learning_history = []  # [(k, num_samples, error), ...]
         self.states_set_history = []  # [(k, num_samples, seen_states_set), ...]
         self.transitions_seen_history = []  # [(k, num_samples, transitions_seen), ...]
@@ -89,7 +90,6 @@ class LTLReachabilityLearner:
         staying_mdp = MDP()
         staying_mdp.states = set(state_set)
         staying_state_action_pairs = self._get_staying_state_action_pairs(curr_mdp, state_set)
-        # print("Helo", staying_state_action_pairs)
         
         for state in state_set:
             staying_mdp.topology[state] = set()
@@ -101,7 +101,6 @@ class LTLReachabilityLearner:
             # Copy transition probabilities for staying transitions
             for next_state, count in curr_mdp.sample_counts[(state, action)].items():
                 assert next_state in state_set, "staying_state_action_pairs should have only state-action pairs where all possible transitions end up in the state_set."
-                # staying_mdp.add_transition(state, action, next_state, probability)
                 staying_mdp.update_transition_count(state, action, next_state, count)
         
         return staying_mdp
@@ -117,7 +116,6 @@ class LTLReachabilityLearner:
         Returns:
             list: A list of sets, where each set represents a possible end component.
         """
-        # print("TP curr", curr_mdp.sample_counts)
         staying_mdp = self._get_staying_mdp(curr_mdp, X)
         sccs = self._find_strongly_connected_components(staying_mdp, X)
         
@@ -133,22 +131,6 @@ class LTLReachabilityLearner:
         for scc in sccs:
             end_component_candidates.extend(self._find_all_possible_end_components(curr_mdp, scc))
         
-        # print(end_component_candidates)
-        
-        # if (only_mecs):
-        #     # Merge overlapping ECs to ensure only maximal ECs are returned
-        #     maximal_end_component_candidates = []
-        #     for ec in end_component_candidates:
-        #         merged = False
-        #         for mec in maximal_end_component_candidates:
-        #             if not ec.isdisjoint(mec):  # Check if EC overlaps with an existing MEC
-        #                 mec.update(ec)  # Merge the two ECs
-        #                 merged = True
-        #                 break
-        #         if not merged:
-        #             maximal_end_component_candidates.append(ec)
-        #     end_component_candidates = maximal_end_component_candidates
-        
         return end_component_candidates
     
     def _find_strongly_connected_components(self, mdp, state_set=None):
@@ -162,12 +144,9 @@ class LTLReachabilityLearner:
         Returns:
             List of SCCs (sets), where each SCC is a set of states.
         """
-        # TODO: confirm this is tarjan's algorithm and write tests to make sure it works
         if state_set is None:
             state_set = mdp.states
-        
-        # print(mdp.sample_counts)
-        
+                
         index_counter = [0]
         stack = []
         lowlinks = {}
@@ -181,10 +160,7 @@ class LTLReachabilityLearner:
             actions = mdp.topology.get(state, set())
             
             for action in actions:
-                # transitions = mdp.get_transition_probabilities(state, action)
-                # for next_state in transitions.keys():
                 for next_state, count in mdp.sample_counts[(state, action)].items():
-                    # if next_state in state_set and transitions[next_state] > 0:
                     if next_state in state_set and count > 0:
                         successors.add(next_state)
             
@@ -220,7 +196,6 @@ class LTLReachabilityLearner:
                 elif len(scc) == 1:
                     # Single node SCC only if it has a self-loop
                     single_node = list(scc)[0]
-                    # print(single_node, get_successors(single_node))
                     if single_node in get_successors(single_node):
                         sccs.append(scc)
                     
@@ -247,7 +222,7 @@ class LTLReachabilityLearner:
         assert 0 < transition_error_tolerance < 1, "Transition error tolerance must be between 0 and 1."
         assert 0 < p_min < 1, "Minimum transition probability (p_min) must be between 0 and 1."
 
-        num_required_samples = np.log(transition_error_tolerance) / (np.log(1 - p_min + 1e-100) + 1e-100)
+        num_required_samples = int(np.log(transition_error_tolerance) / (np.log(1 - p_min + 1e-100) + 1e-100)) + 1
         return num_required_samples
     
     def _confidently_detect_end_component(self, curr_mdp, ec_candidate, transition_error_tolerance, p_min):
@@ -270,12 +245,25 @@ class LTLReachabilityLearner:
         min_num_samples = self._end_component_detection_num_required_samples(transition_error_tolerance, p_min)
         staying_state_action_pairs = self._get_staying_state_action_pairs(curr_mdp, ec_candidate)
         
-        # Check if all staying pairs have enough samples
+        # Check if all staying pairs have enough samples. If not, gather more samples.
         for (state, action) in staying_state_action_pairs:
-            total_samples = curr_mdp.get_sample_count(state, action)  # curr_mdp == discovered_mdp so we stop doing this: + self.discovered_mdp.get_sample_count(state, action) # we need to see if there are enoughs samples from all seen samples
+            total_samples = curr_mdp.get_sample_count(state, action)  # NOTE: curr_mdp == discovered_mdp so we stop doing this: + self.discovered_mdp.get_sample_count(state, action) # we need to see if there are enoughs samples from all seen samples
             if total_samples < min_num_samples:
-                return False  # Not enough samples to confidently detect
+                # return False  # Not enough samples to confidently detect
+                num_needed_samples = min_num_samples - total_samples
+                for _ in tqdm(range(max(0, int(num_needed_samples))), desc=f"EC samples for {(state, action)}", unit="sample"):
+                    next_state, reward = self.mdp_sim.step(state, action)
+                    if (next_state not in self.discovered_mdp.states):
+                        self.add_gt_state_and_actions_to_mdp(self.discovered_mdp, next_state, is_goal=(reward == 1))
+                    curr_mdp.record_sample(state, action, next_state)
         
+        new_staying_state_action_pairs = self._get_staying_state_action_pairs(curr_mdp, ec_candidate)
+        states_with_staying_actions = set()
+        for (state, action) in new_staying_state_action_pairs:
+            states_with_staying_actions.add(state)
+        if states_with_staying_actions != ec_candidate:
+            return False
+
         return True
     
     def is_looping(self, current_state, transition_error_tolerance, p_min):
@@ -311,6 +299,9 @@ class LTLReachabilityLearner:
 
         Args:
             state_set_size_history (list): List of previously seen state set sizes.
+        
+        Returns:
+            bool: True if a loop is detected, False otherwise.
         """
         if (len(state_set_size_history) == 0 or len(state_set_size_history) <= state_set_size_history[-1]**2):
             return False
@@ -327,6 +318,9 @@ class LTLReachabilityLearner:
 
         Args:
             visited_states_counter (Counter): Counter of previously seen states.
+        
+        Returns:
+            bool: True if a loop is detected, False otherwise.
         """
         curr_num_states = len(visited_states_counter.keys())
         is_looping = visited_states_counter[curr_num_states] > curr_num_states
@@ -384,31 +378,64 @@ class LTLReachabilityLearner:
         """
         successful_runs = 0
         for _ in range(0, n):
-            curr_state = mdp.initial_state
+            # start from the ground-truth initial state
+            curr_state = self.mdp_sim.gt_mdp.initial_state
+
             for _ in range(0, max_steps):
-                if (curr_state in self.mdp_sim.gt_mdp.goal_states):
+                if curr_state in self.mdp_sim.gt_mdp.goal_states:
                     successful_runs += 1
                     break
-                if (curr_state not in mdp.states):
-                    break  # cannot continue if we don't know this state
-                action = mdp.learned_policy.get(curr_state, None)
+                
+                in_super_state = (curr_state in mdp.state_MEC)
+                if (in_super_state):
+                    policy_state = mdp.state_MEC[curr_state]
+                else:
+                    policy_state = curr_state
+
+                if (policy_state not in mdp.states):
+                    break
+
+                action = mdp.learned_policy.get(policy_state, None)
                 if action is None:
-                    break  # no known action for this state
-                next_state, _ = self.mdp_sim.step(curr_state, action)
+                    break
+
+                # If action comes from an MEC it will be in the form (s, a)
+                if in_super_state:
+                    mec_s, mec_a = action
+                    if curr_state == mec_s:
+                        chosen_action = mec_a
+                    else:
+                        # choose a random action available in the ground-truth MDP for the current state
+                        # available = list(self.mdp_sim.gt_mdp.topology.get(curr_state, []))
+                        available = [a for a in list(self.mdp_sim.gt_mdp.topology.get(curr_state, [])) if (curr_state, a) in mdp.MEC_state_action_pairs[policy_state]]
+                        if not available:
+                            break
+                        chosen_action = np.random.choice(available)
+                else:
+                    chosen_action = action
+
+                next_state, _ = self.mdp_sim.step(curr_state, chosen_action)
                 curr_state = next_state
 
         return successful_runs / n
+    
+    def add_gt_state_and_actions_to_mdp(self, mdp, s, is_goal):
+        assert s in self.mdp_sim.gt_mdp.states, f"The state must be in the MDP simulator's states. Got state: {s}. MDP Simulator's states: {self.mdp_sim.gt_mdp.states}"
+        mdp.add_state(s, is_goal=is_goal)
+        for a in self.mdp_sim.gt_mdp.topology[s]:
+            mdp.add_action_to_state(s, a)
 
     def simulate(self, initial_state, confidence_error_k, p_k):
         """
-        Algorithm 10: simulating the environment to collect transition counts
-        to explore black-box MDP to run BVI.
+        Simulating the environment to collect transition counts
+        to explore black-box MDP to run BVI. Uses and updates 
+        the global discovered_mdp object.
 
         Args:
             initial_state: Beginning state to start the simulation.
+            confidence_error_k (float): Confidence error for the current iteration.
+            p_k (float): Minimum transition probability for the current iteration.
         
-        Returns:
-            MDP discovered solely during this simulation.
         """
         for a in self.mdp_sim.gt_mdp.topology[initial_state]:
             self.discovered_mdp.add_action_to_state(initial_state, a)
@@ -422,42 +449,44 @@ class LTLReachabilityLearner:
             else:
                 return False
 
-        transition_error_tolerance = self._calculate_transition_probability_error_tolerance(confidence_error_k, p_k, len(self.discovered_mdp.state_action_pairs))
+        transition_error_tolerance = self._calculate_transition_probability_error_tolerance(confidence_error_k, p_k, len(self.discovered_mdp.state_action_pairs))  # Used for delta_t sure EC detection
         state_set_size_history = []
         visited_states = set()
         visited_states.add(curr_state)
-        visited_states_counter = Counter()
-
-        def add_gt_state_and_actions_to_mdp(mdp, s, is_goal):
-            assert s in self.mdp_sim.gt_mdp.states, f"The state must be in the MDP simulator's states. Got state: {s}. MDP Simulator's states: {self.mdp_sim.gt_mdp.states}"
-            mdp.add_state(s, is_goal=is_goal)
-            for a in self.mdp_sim.gt_mdp.topology[s]:
-                mdp.add_action_to_state(s, a)
-
+        visited_states_counter = Counter()  # Used for seen state looping detection
 
         # while (not reached_goal(curr_state) and not self.is_looping(curr_state, transition_error_tolerance, p_k)):
         while (not reached_goal(curr_state) and not self.is_looping_state_set_change(state_set_size_history)):
         # while (not reached_goal(curr_state) and not self.is_looping_seen_state(visited_states_counter)):
             if (curr_state not in self.discovered_mdp.states):
-                add_gt_state_and_actions_to_mdp(self.discovered_mdp, curr_state, is_goal=(curr_state in self.mdp_sim.gt_mdp.goal_states))
-            curr_action = self.discovered_mdp.sample_best_action_from_state(curr_state) # TODO: double check this - this should be discovered mdp cuz it has all the past samples; we don't want to sample starting from random guessing each sim
-            self.discovered_mdp.add_action_to_state(curr_state, curr_action) #NOTE: should have already been added
+                self.add_gt_state_and_actions_to_mdp(self.discovered_mdp, curr_state, is_goal=(curr_state in self.mdp_sim.gt_mdp.goal_states))
+            curr_action = self.discovered_mdp.sample_best_action_from_state(curr_state)
+            self.discovered_mdp.add_action_to_state(curr_state, curr_action) # NOTE: should have already been added
             curr_next_state, reward = self.mdp_sim.step(curr_state, curr_action)            
             
             # NOTE: we assume we have an oracle that will tell us all the valid actions from a state
             if (curr_next_state not in self.discovered_mdp.states):
-                add_gt_state_and_actions_to_mdp(self.discovered_mdp, curr_next_state, is_goal=(reward == 1))
+                self.add_gt_state_and_actions_to_mdp(self.discovered_mdp, curr_next_state, is_goal=(reward == 1))
 
             self.discovered_mdp.record_sample(curr_state, curr_action, curr_next_state)
             curr_state = curr_next_state
             visited_states.add(curr_state)
             state_set_size_history.append(len(visited_states))
             # visited_states_counter[curr_state] += 1
-        
-        # return sample_mdp
     
     def learn(self, analysis_dir=""):
+        """
+        Main learning loop for PAC learning of LTL reachability.
+        Iteratively simulates, updates, and runs BVI on the partial
+        discovered MDP until convergence. Confidence error and minimum
+        transition probability are halved each iteration.
+
+        Args:
+            analysis_dir (str): Directory to save analysis plots and data.
+        """
+
         self.learning_history = []
+        prev_collapsed_mdp_MEC_states = dict()  # {super_state: set of states in MEC}
         error = 1
         confidence_error = 1 ### TODO: will update this later in the final algorithm.
         p_min = 1  # NOTE: Optimization? Update p_min by either dividing by 2 or updating it to the lowest seen transition probability?
@@ -466,12 +495,13 @@ class LTLReachabilityLearner:
         self.discovered_mdp.p_min = p_min
 
         def calculate_N_k(k):
+            # NOTE: This is a heuristic for N_k. It is not does not provide the same guarantees as the N_k in the paper.
             # return 1000  # constant - experimentation: plot learning curve to figure out the best way to calculate N_k
             return (len(self.discovered_mdp.states) + 1) * (k**2) * 10
 
         while True:
             
-            # accept control c interrupt and safely exit while saving progress
+            # Accept control c interrupt and safely exit while saving progress
             try:
                 # Update Hyperparameters
                 k += 1
@@ -486,11 +516,10 @@ class LTLReachabilityLearner:
 
                 N_k = calculate_N_k(k)
 
-                # Simulation Phase
+                ### Simulation Phase
                 for _ in tqdm(range(0, N_k), desc=f"Sim k={k}", unit="sim"):
                     self.simulate(self.discovered_mdp.initial_state, confidence_error_k, p_k)
                 
-                # total sum of all sample counts across all (state, action) pairs
                 total_sample_counts = sum(
                         sum(next_counts.values()) for next_counts in self.discovered_mdp.sample_counts.values()
                     )
@@ -503,35 +532,42 @@ class LTLReachabilityLearner:
                     self.transitions_seen_history.append((k, total_sample_counts, sum(len(sat_counts.values()) for sa, sat_counts in self.discovered_mdp.sample_counts.items())))
 
 
-                # BVI Update Phase
-                # TODO: copy the discovered mdp and collapse it (eliminate MECs) for BVI (get the policy from this - rng is the policy for states in MEC)
+                ### BVI Update Phase
+                delta_c = self._calculate_transition_probability_error_tolerance(confidence_error_k, p_k, len(self.discovered_mdp.state_action_pairs))
                 collapsed_discovered_mdp = copy.deepcopy(self.discovered_mdp)
-                collapsed_discovered_mdp.collapse(self.find_all_MECs(confidence_error_k, p_k))
+                collapsed_discovered_mdp.collapse(self.find_all_MECs(delta_c, p_k))
                 collapsed_discovered_mdp.initialize_mdp_value_bounds()
 
                 bvi_history = []
                 print("Explored Collapsed states:", len(collapsed_discovered_mdp.states))
 
                 collapsed_discovered_mdp.update_transition_probabilities()
-                # for _ in range(0, len(self.discovered_mdp.states) * (2 ** k)): ## TODO: use this one? same as paper
                 for _ in tqdm(range(self.num_bvi_iterations(len(collapsed_discovered_mdp.states), k)),
                               desc=f"BVI k={k}", unit="it"):
-                    # Update
                     collapsed_discovered_mdp.bvi_update()
                     bvi_history.append([k, confidence_error_k, p_k, collapsed_discovered_mdp.get_mdp_error()])
-                self.plot_bvi_history(bvi_history, "./plots/test_loop_bvi.png")
+                self.plot_bvi_history(bvi_history, analysis_dir)
+
+                collapsed_discovered_mdp.update_learned_policy()
+
+                # The learned policy can be extracted from the latest collapsed MDP
+                self.latest_collapsed_mdp = collapsed_discovered_mdp
+
                 curr_error = collapsed_discovered_mdp.get_mdp_error()
+                self.learning_history.append([k, total_sample_counts, confidence_error_k, p_k, curr_error])
+
                 if (analysis_dir != ""):
-                    self.learning_history.append([k, total_sample_counts, confidence_error_k, p_k, curr_error])
                     self.policy_accuracy_history.append((k, total_sample_counts, confidence_error_k, p_k, self.calculate_policy_accuracy(collapsed_discovered_mdp, max_steps=int(len(self.mdp_sim.gt_mdp.states)**2 / p_k))))
                 
                 print("Error:", self.learning_history[-1])
                 
-                if (k > 1 and self.has_converged(collapsed_discovered_mdp, self.learning_history[-2])):  # NOTE: -2 because we want the one before the current iteration (current iteration is -1 index).
+                if (k > 1 and self.has_converged(collapsed_discovered_mdp, self.learning_history[-2], prev_collapsed_mdp_MEC_states)):  # NOTE: -2 because we want the one before the current iteration (current iteration is -1 index).
                     print("Algorithm has converged, exiting...")
                     if (analysis_dir != ""):
                         self.run_analysis(analysis_dir)
                     break
+
+                prev_collapsed_mdp_MEC_states = collapsed_discovered_mdp.MEC_states.copy()
             except KeyboardInterrupt:
                 if (analysis_dir != ""):
                     self.run_analysis(analysis_dir)
@@ -539,6 +575,12 @@ class LTLReachabilityLearner:
             
 
     def run_analysis(self, analysis_dir):
+        """
+        Run analysis and generate plots for the learning process.
+
+        Args:
+            analysis_dir (str): Directory to save analysis plots and data.
+        """
         if not os.path.exists(analysis_dir):
             os.makedirs(analysis_dir)
         self.plot_error_history(analysis_dir, log_scale=True)
@@ -552,9 +594,9 @@ class LTLReachabilityLearner:
         error_vs_k_plot_path = os.path.join(analysis_dir, "error_vs_k.png")
         plt.figure()
         if log_scale:
-            plt.semilogy(list(np.array(self.learning_history)[:, -1]))
+            plt.semilogy(list(np.array(self.learning_history)[:, -1]), marker='o')
         else:
-            plt.plot(list(np.array(self.learning_history)[:, -1]))
+            plt.plot(list(np.array(self.learning_history)[:, -1]), marker='o')
         plt.xlabel("Iteration")
         plt.ylabel("Error (U - L)")
         plt.title("Learning Error History")
@@ -580,9 +622,9 @@ class LTLReachabilityLearner:
         num_states_seen_vs_k_plot_path = os.path.join(analysis_dir, "num_states_seen_vs_k.png")
         plt.figure()
         if log_scale:
-            plt.semilogy(list(np.array(self.states_set_history)[:, -1]))
+            plt.semilogy(list(np.array(self.states_set_history)[:, -1]), marker='o')
         else:
-            plt.plot(list(np.array(self.states_set_history)[:, -1]))
+            plt.plot(list(np.array(self.states_set_history)[:, -1]), marker='o')
         plt.xlabel("Iteration")
         plt.ylabel("Num Seen States")
         plt.title("Num Seen States History")
@@ -608,9 +650,9 @@ class LTLReachabilityLearner:
         num_transitions_seen_vs_k_plot_path = os.path.join(analysis_dir, "num_transitions_seen_vs_k.png")
         plt.figure()
         if log_scale:
-            plt.semilogy(list(np.array(self.transitions_seen_history)[:, -1]))
+            plt.semilogy(list(np.array(self.transitions_seen_history)[:, -1]), marker='o')
         else:
-            plt.plot(list(np.array(self.transitions_seen_history)[:, -1]))
+            plt.plot(list(np.array(self.transitions_seen_history)[:, -1]), marker='o')
         plt.xlabel("Iteration")
         plt.ylabel("Num Seen Transitions")
         plt.title("Num Seen Transitions History")
@@ -636,10 +678,10 @@ class LTLReachabilityLearner:
         policy_accuracy_vs_k_plot_path = os.path.join(analysis_dir, "policy_accuracy_vs_k.png")
         plt.figure()
         if log_scale:
-            plt.semilogx(list(np.array(self.policy_accuracy_history)[:, 0]), list(np.array(self.policy_accuracy_history)[:, -1]))
+            plt.semilogx(list(np.array(self.policy_accuracy_history)[:, 0]), list(np.array(self.policy_accuracy_history)[:, -1]), marker='o')
             plt.xlabel("Iteration (log scale)")
         else:
-            plt.plot(list(np.array(self.policy_accuracy_history)[:, 0]), list(np.array(self.policy_accuracy_history)[:, -1]))
+            plt.plot(list(np.array(self.policy_accuracy_history)[:, 0]), list(np.array(self.policy_accuracy_history)[:, -1]), marker='o')
             plt.xlabel("Iteration")
         plt.ylabel("Policy Accuracy")
         plt.title("Policy Accuracy History")
@@ -661,13 +703,14 @@ class LTLReachabilityLearner:
         plt.savefig(policy_accuracy_vs_samples_plot_path)
         plt.close()
 
-    def plot_bvi_history(self, bvi_history, error_history_plot_path, log_scale=False):
+    def plot_bvi_history(self, bvi_history, analysis_dir, log_scale=False):
         # plots the learning error history for each iteration and saves it to error_history_plot_path
+        error_history_plot_path = os.path.join(analysis_dir, "bvi_error_history.png")
         plt.figure()
         if log_scale:
-            plt.semilogy(list(np.array(bvi_history)[:, -1]))
+            plt.semilogy(list(np.array(bvi_history)[:, -1]), marker='o')
         else:
-            plt.plot(list(np.array(bvi_history)[:, -1]))
+            plt.plot(list(np.array(bvi_history)[:, -1]), marker='o')
         plt.xlabel("Iteration")
         plt.ylabel("Error (U - L)")
         plt.title("BVI Error History")
@@ -694,7 +737,7 @@ class LTLReachabilityLearner:
         """Get the discovered MDP model."""
         return self.discovered_mdp
     
-    def print_summary(self, true_confidence_error, true_p_min, k=10, output_path=""):
+    def print_summary(self, true_confidence_error, true_p_min, k=10, output_path="", analysis_dir=""):
 
         """Print a summary of the learned model or save it as JSON if output_path is provided."""
         print("Generating learned MDP summary...")
@@ -709,11 +752,13 @@ class LTLReachabilityLearner:
         collapsed_discovered_mdp.initialize_mdp_value_bounds()
 
         bvi_history = []
+        collapsed_discovered_mdp.update_transition_probabilities()
         for _ in tqdm(range(0, self.num_bvi_iterations(len(collapsed_discovered_mdp.states), k)),
                   desc="Final BVI", unit="it"):
             collapsed_discovered_mdp.bvi_update()
             bvi_history.append([_, true_confidence_error, true_p_min, collapsed_discovered_mdp.get_mdp_error()])
-        self.plot_bvi_history(bvi_history, "./plots/test_loop_bvi.png")
+        self.plot_bvi_history(bvi_history, analysis_dir)
+        collapsed_discovered_mdp.update_learned_policy()
         print("Error after final BVI:", collapsed_discovered_mdp.get_mdp_error())
 
         # Prepare data in JSON-serializable form
@@ -845,80 +890,45 @@ class LTLReachabilityLearner:
                 record = self.learning_history[i]
                 print(f"  {record[0]}, {record[1]}, {record[-1]}, {self.states_set_history[i][-1]}, {self.transitions_seen_history[i][-1]}, {self.policy_accuracy_history[i][-1]}")
         
+
+    def has_converged(self, curr_mdp, prev_iter_history, prev_collapsed_mdp_MEC_states=None, threshold=0.0001):
+        """
+        Check if the learning process has converged based on the change in MDP error.
         
-        # print("="*60 + "\n")
-        # """Print a summary of the learned model."""
-        # if self.discovered_mdp is None:
-        #     print("No MDP has been learned yet.")
-        #     return
-
-        # collapsed_discovered_mdp = copy.deepcopy(self.discovered_mdp)
-        # collapsed_discovered_mdp.confidence_error = true_confidence_error
-        # collapsed_discovered_mdp.p_min = true_p_min
-        # collapsed_discovered_mdp.collapse(self.find_all_MECs(true_confidence_error, true_p_min))
-        # collapsed_discovered_mdp.initialize_mdp_value_bounds()
-
-        # for _ in range(0, self.num_bvi_iterations(len(collapsed_discovered_mdp.states), 1000)):
-        #     collapsed_discovered_mdp.bvi_update()
+        Args:
+            curr_mdp (MDP): The current discovered MDP after the latest iteration.
+            prev_iter_history (tuple): A tuple containing the previous iteration's parameters:
+                (k, total_num_samples, delta, p_min, error).
+            threshold (float): The threshold for convergence based on error change.
+        """
+        # Make sure MEC states have not changed
+        if (prev_collapsed_mdp_MEC_states is not None):
+            curr_mdp_MEC_states = list(curr_mdp.MEC_states.values())
+            prev_mdp_MEC_states = list(prev_collapsed_mdp_MEC_states.values())
+            if (len(curr_mdp_MEC_states) != len(prev_mdp_MEC_states)):
+                return False
+            for mec_states in curr_mdp_MEC_states:
+                if mec_states not in prev_mdp_MEC_states:
+                    return False
+                prev_mdp_MEC_states.remove(mec_states)
+            if (len(prev_mdp_MEC_states) != 0):
+                return False
         
-        # print("\n" + "="*60)
-        # print("DISCOVERED MDP SUMMARY")
-        # print("="*60)
-        # print(f"States: {len(self.discovered_mdp.states)}")
-        # print(f"State-Action Pairs: {len(self.discovered_mdp.state_action_pairs)}")
-        # print(f"Initial State: {self.discovered_mdp.initial_state}")
-        # print(f"Goal States: {self.discovered_mdp.goal_states}")
-
-        # print("\nDiscovered MDP after collapsing MECs:")
-        # print(f"States: {collapsed_discovered_mdp.states}")
-        # print(f"State-Action Pairs: {collapsed_discovered_mdp.state_action_pairs}")
-        # print(f"Initial State: {collapsed_discovered_mdp.initial_state}")
-        # print(f"Goal States: {collapsed_discovered_mdp.goal_states}")
-
-        # print("\nState Value Bounds:")
-        # for state in collapsed_discovered_mdp.states:
-        #     bounds = collapsed_discovered_mdp.get_value_bounds(state)
-        #     print(f"  {state}: [{bounds[0]:.4f}, {bounds[1]:.4f}]")
-
-        # print("\nState Action Value Bounds:")
-        # for (state, action) in collapsed_discovered_mdp.state_action_pairs:
-        #     bounds = collapsed_discovered_mdp.sa_value_bounds[(state, action)]
-        #     print(f"  {state}, {action}: [{bounds[0]:.4f}, {bounds[1]:.4f}]")
-
-        # print("\nError (U(s0) - L(s0)):", collapsed_discovered_mdp.s_value_bounds[collapsed_discovered_mdp.initial_state][1] - collapsed_discovered_mdp.s_value_bounds[collapsed_discovered_mdp.initial_state][0])
-        
-        # print("\nSample Counts by State-Action:")
-        # for (state, action) in self.discovered_mdp.state_action_pairs:
-        #     total = self.discovered_mdp.get_sample_count(state, action)
-        #     print(f"  ({state}, {action}): {total} samples")
-
-        # print("\nTransition Probabilities:")
-        # for (state, action) in collapsed_discovered_mdp.state_action_pairs:
-        #     transition_probs = 0 if (state, action) not in collapsed_discovered_mdp.transition_probabilities.keys() else collapsed_discovered_mdp.transition_probabilities[(state, action)]
-        #     print(f"  ({state}, {action}): {transition_probs}")
-
-        # print("\nLearned Policy:")
-        # for state, best_action in collapsed_discovered_mdp.learned_policy.items():
-        #     print(f"  State: {state} --> Action: {best_action}")
-        
-        # print("="*60 + "\n")
-
-
-    def has_converged(self, curr_mdp, prev_iter_history, threshold=0.0001):
         prev_k, prev_total_num_samples, prev_delta, prev_p_min, prev_error =  prev_iter_history
         test_mdp = copy.deepcopy(curr_mdp)
         test_mdp.confidence_error = prev_delta
         test_mdp.p_min = prev_p_min
 
+        test_mdp.update_transition_probabilities()
         for _ in range(0, self.num_bvi_iterations(len(test_mdp.states), prev_k)):
             # Update
             test_mdp.bvi_update()
         curr_error = test_mdp.get_mdp_error()
         # NOTE: the curr_error may be greater than the prev_error if a new MEC was found.
-        # print("Convergence Check - prev_error:", prev_error, "curr_error:", curr_error)
         # assert curr_error <= prev_error, f"Current error should be less than previous error if BVI is working correctly, got curr_error: {curr_error}, prev_error: {prev_error}"
         print(prev_error, curr_error, (prev_error - curr_error), threshold)
         return (prev_error - curr_error) < threshold
 
     def num_bvi_iterations(self, num_states, k):
+        # TODO: use what they used in their paper? --> len(self.discovered_mdp.states) * (2 ** k))
         return int(num_states * k / 5) + 1

@@ -25,6 +25,7 @@ class MDP:
 
         self.state_MEC = dict()  # {state: respective super_state} - many to 1 relation between states and MECs/super_states
         self.MEC_states = dict()  # {super_state: set(states)} - reverse mapping of state_MEC
+        self.MEC_state_action_pairs = dict()  # {(super_state, (state, action)): True} - all discovered (super_state, (state, action)) pairs
 
         self.confidence_error = confidence_error  # delta
         self.p_min = p_min  # minimum transition probability
@@ -125,6 +126,10 @@ class MDP:
             self.s_value_bounds[new_super_state] = [0, 1] # TODO: is this correct?
             if (s == self.initial_state):
                 self.initial_state = new_super_state
+
+        self.MEC_state_action_pairs[new_super_state] = set()
+        for s, a in state_action_pairs:
+            self.MEC_state_action_pairs[new_super_state].add((s, a))
 
     def collapse_state_MEC_transitions(self, state):
         """
@@ -257,10 +262,10 @@ class MDP:
             if (self.sa_value_bounds[(state, a)][1] > new_s_value_bounds[1]):
                 new_s_value_bounds[1] = self.sa_value_bounds[(state, a)][1]
                 # Update policy based on the updated best action for a given state
-                self.learned_policy[state] = a  # TODO: update this to account for MEC collapse?
-            if (self.sa_value_bounds[(state, a)][1] == self.sa_value_bounds[(state, self.learned_policy[state])][1] and
-                self.sa_value_bounds[(state, a)][0] > self.sa_value_bounds[(state, self.learned_policy[state])][0]):
-                self.learned_policy[state] = a  # TODO: update this to account for MEC collapse?
+                # self.learned_policy[state] = a  # TODO: update this to account for MEC collapse?
+            # if (self.sa_value_bounds[(state, a)][1] == self.sa_value_bounds[(state, self.learned_policy[state])][1] and
+            #     self.sa_value_bounds[(state, a)][0] > self.sa_value_bounds[(state, self.learned_policy[state])][0]):
+                # self.learned_policy[state] = a  # TODO: update this to account for MEC collapse?
         
         assert new_s_value_bounds != [-1, -1], "new_s_value_bounds was not updated."
 
@@ -268,6 +273,23 @@ class MDP:
             self.s_value_bounds[state] = new_s_value_bounds
         else:
             return new_s_value_bounds
+    
+    def update_learned_policy(self):
+        for s in self.states:
+            if s in self.goal_states:
+                continue
+            best_action = None
+            best_action_value_upper_bound = -1
+            for a in self.topology[s]:
+                lower_action_value_bound, upper_action_value_bound = self.sa_value_bounds[(s, a)]
+                if (upper_action_value_bound > best_action_value_upper_bound):
+                    best_action = a
+                    best_action_value_upper_bound = upper_action_value_bound
+                elif (upper_action_value_bound == best_action_value_upper_bound and
+                      lower_action_value_bound > self.sa_value_bounds[(s, best_action)][0]):
+                    # Tie-breaker: choose action with higher lower bound
+                    best_action = a
+            self.learned_policy[s] = best_action
 
     
     def bvi_update(self):
@@ -306,7 +328,7 @@ class MDP:
         Returns:
             float: The calculated margin of error for the transition probability estimate.
         """
-        assert 0 < confidence_error < 1, f"Confidence error tolerance must be between 0 and 1, got {confidence_error}."
+        assert 0 < confidence_error <= 1, f"Confidence error tolerance must be between 0 and 1, got {confidence_error}."
         num_samples = self.get_sample_count(state, action)
         if (num_samples == 0):
             return 1
