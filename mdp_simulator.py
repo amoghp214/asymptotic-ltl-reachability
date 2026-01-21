@@ -31,7 +31,7 @@ class MDPSimulator:
         # Given this transitions dictionary, sample next state according to the probabilities
         next_states = list(transitions.keys())
         probabilities = list(transitions.values())
-        assert sum(probabilities) == 1.0, f"Simulator should have true probabilities that sum up to 1 for ({state}, {action})."
+        assert (abs(sum(probabilities) - 1.0) < 1e-8), f"Simulator should have true probabilities that sum up to 1 for ({state}, {action})."
         sampled_index = np.random.choice(len(next_states), p=probabilities)
         next_state = next_states[sampled_index]
         reward = (next_state in self.gt_mdp.goal_states)
