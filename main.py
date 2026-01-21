@@ -7,7 +7,9 @@ import numpy as np
 from mdp import MDP
 from mdp_simulator import MDPSimulator
 from ltl_reachability_learner import LTLReachabilityLearner
-from convert_jani_to_mdp import convert_jani_to_mdp
+# from convert_jani_to_mdp import convert_jani_to_mdp
+from new_convert_jani_to_mdp import convert_jani_to_mdp
+import argparse
 
 def sim_mdp_setup_1():
     mdp_sim = MDPSimulator()
@@ -141,13 +143,54 @@ def ij10_jani_mdp():
     
     learner.print_summary(true_confidence_error=0.01, true_p_min=0.5, output_path="./logs/ij10_learning_log.json", analysis_dir=analysis_path)
 
+
+
+def run_jani_mdp(jani_file_path, analysis_path, log_output_path, true_confidence_error, true_p_min):
+    """
+    Example 1: Simple 3-state MDP from JANI file
+    States: 0, 1, 2 (2 is goal)
+    Actions: a, b
+    """
+    print("\n" + "="*60)
+    print("JANI MDP: " + jani_file_path)
+    print("="*60)
+
+    mdp_sim = MDPSimulator(mdp=convert_jani_to_mdp(jani_file_path))
+
+    # Create learner
+    learner = LTLReachabilityLearner(mdp_simulator=mdp_sim)
+
+    print("================= Starting Learning Process =================")
+    learner.learn(analysis_path)
+    
+    learner.print_summary(true_confidence_error=true_confidence_error, true_p_min=true_p_min, output_path=log_output_path, analysis_dir=analysis_path)
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run learning on a JANI MDP model.")
+    parser.add_argument("-m", "--mpd_model", type=str, default="ij3",
+                        help="MDP model base name (default: 'ij3')")
+    parser.add_argument("-v", "--version", type=int, default=1,
+                        help="Version of the MDP model (default: 1)")
+    parser.add_argument("-c", "--true_confidence_error", type=float, default=0.01,
+                        help="True confidence error (default: 0.01)")
+    parser.add_argument("-p", "--true_p_min", type=float, default=0.01,
+                        help="True p_min (default: 0.01)")
+
+    args = parser.parse_args()
+
     # Set random seed for reproducibility
     np.random.seed(42)
-    
-    # Run examples
-    example_simple_mdp()
-    # ij10_jani_mdp()
+
+    jani_file_path = f"./mdp_models/{args.mpd_model}.v{args.version}.jani"
+    analysis_path = f"./results/{args.mpd_model.replace('.', '_')}_analysis_test"
+    log_output_path = f"./logs/{args.mpd_model.replace('.', '_')}_learning_log_test.json"
+
+    run_jani_mdp(jani_file_path=jani_file_path,
+                 analysis_path=analysis_path,
+                 log_output_path=log_output_path,
+                 true_confidence_error=args.true_confidence_error,
+                 true_p_min=args.true_p_min)
+
     
     print("\n" + "="*60)
     print("All examples completed!")
