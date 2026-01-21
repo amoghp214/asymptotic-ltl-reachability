@@ -369,7 +369,7 @@ class LTLReachabilityLearner:
             error_tolerance = (total_error_tolerance * p_min) / num_seen_sa_pairs
         return error_tolerance
     
-    def calculate_policy_accuracy(self, mdp, n=1000, max_steps=100):
+    def calculate_policy_accuracy(self, mdp, n=100, max_steps=100):
         """
         Calculate the policy accuracy of the discovered MDP.
 
@@ -377,10 +377,12 @@ class LTLReachabilityLearner:
             float: The calculated policy accuracy.
         """
         successful_runs = 0
-        for _ in range(0, n):
+        for _ in tqdm(range(0, n), desc="Policy accuracy sims", unit="sim"):
+        # for _ in range(0, n):
             # start from the ground-truth initial state
             curr_state = self.mdp_sim.gt_mdp.initial_state
 
+            # for _ in tqdm(range(0, max_steps), desc="Policy accuracy sim steps", unit="step"):
             for _ in range(0, max_steps):
                 if curr_state in self.mdp_sim.gt_mdp.goal_states:
                     successful_runs += 1
@@ -420,7 +422,7 @@ class LTLReachabilityLearner:
         return successful_runs / n
     
     def add_gt_state_and_actions_to_mdp(self, mdp, s, is_goal):
-        assert s in self.mdp_sim.gt_mdp.states, f"The state must be in the MDP simulator's states. Got state: {s}. MDP Simulator's states: {self.mdp_sim.gt_mdp.states}"
+        assert s in self.mdp_sim.gt_mdp.states, f"The state must be in the MDP simulator's states. Got state: {s}. \n\nMDP Simulator's states: {self.mdp_sim.gt_mdp.states}"
         mdp.add_state(s, is_goal=is_goal)
         for a in self.mdp_sim.gt_mdp.topology[s]:
             mdp.add_action_to_state(s, a)
@@ -554,11 +556,24 @@ class LTLReachabilityLearner:
                 self.latest_collapsed_mdp = collapsed_discovered_mdp
 
                 curr_error = collapsed_discovered_mdp.get_mdp_error()
-                self.learning_history.append([k, total_sample_counts, confidence_error_k, p_k, curr_error])
+                lower_bound = collapsed_discovered_mdp.s_value_bounds[collapsed_discovered_mdp.initial_state][0]
+                upper_bound = collapsed_discovered_mdp.s_value_bounds[collapsed_discovered_mdp.initial_state][1]
+                self.learning_history.append([k, total_sample_counts, confidence_error_k, p_k, curr_error, lower_bound, upper_bound])
 
                 if (analysis_dir != ""):
-                    self.policy_accuracy_history.append((k, total_sample_counts, confidence_error_k, p_k, self.calculate_policy_accuracy(collapsed_discovered_mdp, max_steps=int(len(self.mdp_sim.gt_mdp.states)**2 / p_k))))
-                
+                    # self.policy_accuracy_history.append((k, total_sample_counts, confidence_error_k, p_k, self.calculate_policy_accuracy(collapsed_discovered_mdp, max_steps=int(len(self.mdp_sim.gt_mdp.states)**2 / p_k))))  # TODO: use the number of gt MDP states or discovered MDP states?
+                    self.policy_accuracy_history.append(
+                        (k, 
+                         total_sample_counts, 
+                         confidence_error_k, 
+                         p_k, 
+                         self.calculate_policy_accuracy(
+                             collapsed_discovered_mdp, 
+                             max_steps=int(len(self.discovered_mdp.states)**2 / p_k)
+                            )
+                        )
+                    )
+
                 print("Error:", self.learning_history[-1])
                 
                 if (k > 1 and self.has_converged(collapsed_discovered_mdp, self.learning_history[-2], prev_collapsed_mdp_MEC_states)):  # NOTE: -2 because we want the one before the current iteration (current iteration is -1 index).
@@ -574,29 +589,15 @@ class LTLReachabilityLearner:
                 break
             
 
-    def run_analysis(self, analysis_dir):
-        """
-        Run analysis and generate plots for the learning process.
-
-        Args:
-            analysis_dir (str): Directory to save analysis plots and data.
-        """
-        if not os.path.exists(analysis_dir):
-            os.makedirs(analysis_dir)
-        self.plot_error_history(analysis_dir, log_scale=True)
-        self.plot_states_set_history(analysis_dir)
-        self.plot_transitions_seen_history(analysis_dir)
-        self.plot_policy_accuracy_history(analysis_dir)
-
-    
     def plot_error_history(self, analysis_dir, log_scale=False):
         # plots the learning error history for each iteration and saves it to error_history_plot_path
         error_vs_k_plot_path = os.path.join(analysis_dir, "error_vs_k.png")
+        os.makedirs(analysis_dir, exist_ok=True)
         plt.figure()
         if log_scale:
-            plt.semilogy(list(np.array(self.learning_history)[:, -1]), marker='o')
+            plt.semilogy(list(np.array(self.learning_history)[:, -3]), marker='o')
         else:
-            plt.plot(list(np.array(self.learning_history)[:, -1]), marker='o')
+            plt.plot(list(np.array(self.learning_history)[:, -3]), marker='o')
         plt.xlabel("Iteration")
         plt.ylabel("Error (U - L)")
         plt.title("Learning Error History")
@@ -607,9 +608,9 @@ class LTLReachabilityLearner:
         error_vs_samples_plot_path = os.path.join(analysis_dir, "error_vs_samples.png")
         plt.figure()
         if log_scale:
-            plt.semilogy(list(np.array(self.learning_history)[:, 1]), list(np.array(self.learning_history)[:, -1]))
+            plt.semilogy(list(np.array(self.learning_history)[:, 1]), list(np.array(self.learning_history)[:, -3]))
         else:
-            plt.plot(list(np.array(self.learning_history)[:, 1]), list(np.array(self.learning_history)[:, -1]))
+            plt.plot(list(np.array(self.learning_history)[:, 1]), list(np.array(self.learning_history)[:, -3]))
         plt.xlabel("Number of Samples")
         plt.ylabel("Error (U - L)")
         plt.title("Learning Error vs Number of Samples")
@@ -620,6 +621,7 @@ class LTLReachabilityLearner:
     def plot_states_set_history(self, analysis_dir, log_scale=False):
         # plots the learning error history for each iteration and saves it to error_history_plot_path
         num_states_seen_vs_k_plot_path = os.path.join(analysis_dir, "num_states_seen_vs_k.png")
+        os.makedirs(analysis_dir, exist_ok=True)
         plt.figure()
         if log_scale:
             plt.semilogy(list(np.array(self.states_set_history)[:, -1]), marker='o')
@@ -648,6 +650,7 @@ class LTLReachabilityLearner:
     def plot_transitions_seen_history(self, analysis_dir, log_scale=False):
         # plots the learning error history for each iteration and saves it to error_history_plot_path
         num_transitions_seen_vs_k_plot_path = os.path.join(analysis_dir, "num_transitions_seen_vs_k.png")
+        os.makedirs(analysis_dir, exist_ok=True)
         plt.figure()
         if log_scale:
             plt.semilogy(list(np.array(self.transitions_seen_history)[:, -1]), marker='o')
@@ -676,6 +679,7 @@ class LTLReachabilityLearner:
     def plot_policy_accuracy_history(self, analysis_dir, log_scale=False):
         # plots the learning error history for each iteration and saves it to error_history_plot_path
         policy_accuracy_vs_k_plot_path = os.path.join(analysis_dir, "policy_accuracy_vs_k.png")
+        os.makedirs(analysis_dir, exist_ok=True)
         plt.figure()
         if log_scale:
             plt.semilogx(list(np.array(self.policy_accuracy_history)[:, 0]), list(np.array(self.policy_accuracy_history)[:, -1]), marker='o')
@@ -706,6 +710,7 @@ class LTLReachabilityLearner:
     def plot_bvi_history(self, bvi_history, analysis_dir, log_scale=False):
         # plots the learning error history for each iteration and saves it to error_history_plot_path
         error_history_plot_path = os.path.join(analysis_dir, "bvi_error_history.png")
+        os.makedirs(analysis_dir, exist_ok=True)
         plt.figure()
         if log_scale:
             plt.semilogy(list(np.array(bvi_history)[:, -1]), marker='o')
@@ -717,6 +722,63 @@ class LTLReachabilityLearner:
         plt.grid()
         plt.savefig(error_history_plot_path)
         plt.close()
+    
+    def plot_value_bounds(self, analysis_dir):
+        """Plot lower and upper bounds vs iteration k and vs number of samples."""
+        bounds_vs_k_plot_path = os.path.join(analysis_dir, "value_bounds_vs_k.png")
+        os.makedirs(analysis_dir, exist_ok=True)
+        plt.figure(figsize=(10, 6))
+        
+        k_values = list(np.array(self.learning_history)[:, 0])
+        lower_bounds = list(np.array(self.learning_history)[:, -2])
+        upper_bounds = list(np.array(self.learning_history)[:, -1])
+        
+        plt.plot(k_values, lower_bounds, marker='o', label='Lower Bound L(s0)', linewidth=2)
+        plt.plot(k_values, upper_bounds, marker='s', label='Upper Bound U(s0)', linewidth=2)
+        plt.fill_between(k_values, lower_bounds, upper_bounds, alpha=0.2)
+        
+        plt.xlabel("Iteration (k)")
+        plt.ylabel("Value")
+        plt.title("Value Bounds for Initial State vs Iteration")
+        plt.legend()
+        plt.grid()
+        plt.savefig(bounds_vs_k_plot_path)
+        plt.close()
+
+        bounds_vs_samples_plot_path = os.path.join(analysis_dir, "value_bounds_vs_samples.png")
+        os.makedirs(analysis_dir, exist_ok=True)
+        plt.figure(figsize=(10, 6))
+        
+        sample_counts = list(np.array(self.learning_history)[:, 1])
+        lower_bounds = list(np.array(self.learning_history)[:, -2])
+        upper_bounds = list(np.array(self.learning_history)[:, -1])
+        
+        plt.plot(sample_counts, lower_bounds, marker='o', label='Lower Bound L(s0)', linewidth=2)
+        plt.plot(sample_counts, upper_bounds, marker='s', label='Upper Bound U(s0)', linewidth=2)
+        plt.fill_between(sample_counts, lower_bounds, upper_bounds, alpha=0.2)
+        
+        plt.xlabel("Number of Samples")
+        plt.ylabel("Value")
+        plt.title("Value Bounds for Initial State vs Number of Samples")
+        plt.legend()
+        plt.grid()
+        plt.savefig(bounds_vs_samples_plot_path)
+        plt.close()
+
+    def run_analysis(self, analysis_dir):
+        """
+        Run analysis and generate plots for the learning process.
+
+        Args:
+            analysis_dir (str): Directory to save analysis plots and data.
+        """
+        if not os.path.exists(analysis_dir):
+            os.makedirs(analysis_dir)
+        self.plot_error_history(analysis_dir, log_scale=True)
+        self.plot_states_set_history(analysis_dir)
+        self.plot_transitions_seen_history(analysis_dir)
+        self.plot_policy_accuracy_history(analysis_dir)
+        self.plot_value_bounds(analysis_dir)
     
     def print_learner_results(self, k, confidence_error_k, error_k, p_k):
         print(f"\nLearning interrupted by user on iteration {k}. Saving progress and exiting safely...")
@@ -885,10 +947,10 @@ class LTLReachabilityLearner:
             print("="*60 + "\n")
             print("Analysis")
             print("="*60 + "\n")
-            print("Analysis History (k, total_samples, error, num_seen_states, num_seen_transitions, policy_accuracy):")
+            print("Analysis History (k, total_samples, error, num_seen_states, num_seen_transitions, policy_accuracy, error, lower_bound, upper_bound):")
             for i in range(0, len(self.learning_history)):
                 record = self.learning_history[i]
-                print(f"  {record[0]}, {record[1]}, {record[-1]}, {self.states_set_history[i][-1]}, {self.transitions_seen_history[i][-1]}, {self.policy_accuracy_history[i][-1]}")
+                print(f"  {record[0]}, {record[1]}, {record[-3]}, {self.states_set_history[i][-1]}, {self.transitions_seen_history[i][-1]}, {self.policy_accuracy_history[i][-1]}, {record[-3]}, {record[-2]}, {record[-1]}")
         
 
     def has_converged(self, curr_mdp, prev_iter_history, prev_collapsed_mdp_MEC_states=None, threshold=0.0001):
@@ -914,7 +976,9 @@ class LTLReachabilityLearner:
             if (len(prev_mdp_MEC_states) != 0):
                 return False
         
-        prev_k, prev_total_num_samples, prev_delta, prev_p_min, prev_error =  prev_iter_history
+        prev_k, prev_total_num_samples, prev_delta, prev_p_min, prev_error, prev_l, prev_u =  prev_iter_history
+        if (prev_k < 3):
+            return False  # Need at least 3 iterations to check for convergence
         test_mdp = copy.deepcopy(curr_mdp)
         test_mdp.confidence_error = prev_delta
         test_mdp.p_min = prev_p_min
