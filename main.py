@@ -7,8 +7,7 @@ import numpy as np
 from mdp import MDP
 from mdp_simulator import MDPSimulator
 from ltl_reachability_learner import LTLReachabilityLearner
-# from convert_jani_to_mdp import convert_jani_to_mdp
-from new_convert_jani_to_mdp import convert_jani_to_mdp
+from convert_jani_to_mdp import convert_jani_to_mdp
 import argparse
 
 def sim_mdp_setup_1():
