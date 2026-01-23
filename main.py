@@ -194,7 +194,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Set random seed for reproducibility
-    np.random.seed(42)
+    # np.random.seed(42)
 
     jani_file_path = f"./mdp_models/{args.mpd_model}.v{args.version}.jani"
     analysis_path = f"./results/{args.mpd_model.replace('.', '_')}_analysis_{args.iteration}"
