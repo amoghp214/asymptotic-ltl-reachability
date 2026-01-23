@@ -17,7 +17,7 @@ class LTLReachabilityLearner:
     Main learner class that orchestrates PAC learning of LTL reachability.
     """
     
-    def __init__(self, mdp_simulator: MDPSimulator):
+    def __init__(self, mdp_simulator: MDPSimulator, min_num_iterations=5, max_num_iterations=50, convergence_threshold=0.001, num_policy_accuracy_sims=1000):
         """
         Initialize the learner.
         
@@ -32,6 +32,11 @@ class LTLReachabilityLearner:
         self.states_set_history = []  # [(k, num_samples, seen_states_set), ...]
         self.transitions_seen_history = []  # [(k, num_samples, transitions_seen), ...]
         self.policy_accuracy_history = []  # [(k, num_samples, policy_accuracy), ..x.]
+
+        self.min_num_iterations = min_num_iterations
+        self.max_num_iterations = max_num_iterations
+        self.convergence_threshold = convergence_threshold
+        self.num_policy_accuracy_sims = num_policy_accuracy_sims
     
     def _is_staying_state_action_pair(self, curr_mdp, state_set, state, action):
         """
@@ -370,13 +375,14 @@ class LTLReachabilityLearner:
             error_tolerance = (total_error_tolerance * p_min) / num_seen_sa_pairs
         return error_tolerance
     
-    def calculate_policy_accuracy(self, mdp, n=100, max_steps=100):
+    def calculate_policy_accuracy(self, mdp, max_steps=100):
         """
         Calculate the policy accuracy of the discovered MDP.
 
         Returns:
             float: The calculated policy accuracy.
         """
+        n = self.num_policy_accuracy_sims
         successful_runs = 0
         for _ in tqdm(range(0, n), desc="Policy accuracy sims", unit="sim"):
         # for _ in range(0, n):
@@ -979,7 +985,7 @@ class LTLReachabilityLearner:
                 print(f"  {record[0]}, {record[1]}, {record[-3]}, {self.states_set_history[i][-1]}, {self.transitions_seen_history[i][-1]}, {self.policy_accuracy_history[i][-1]}, {record[-3]}, {record[-2]}, {record[-1]}")
         
 
-    def has_converged(self, curr_mdp, prev_iter_history, prev_collapsed_mdp_MEC_states=None, threshold=0.0005, min_iterations=5, max_iterations=100):
+    def has_converged(self, curr_mdp, prev_iter_history, prev_collapsed_mdp_MEC_states=None):
         """
         Check if the learning process has converged based on the change in MDP error.
         
@@ -1001,7 +1007,9 @@ class LTLReachabilityLearner:
                 prev_mdp_MEC_states.remove(mec_states)
             if (len(prev_mdp_MEC_states) != 0):
                 return False
-        
+        min_iterations = self.min_num_iterations
+        max_iterations = self.max_num_iterations
+        threshold = self.convergence_threshold
         prev_k, prev_total_num_samples, prev_delta, prev_p_min, prev_error, prev_l, prev_u =  prev_iter_history
         if (max_iterations and prev_k >= max_iterations):
             return True  # Reached maximum number of iterations
