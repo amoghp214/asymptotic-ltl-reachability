@@ -188,6 +188,8 @@ if __name__ == "__main__":
                         help="Convergence threshold (default: 0.001)")
     parser.add_argument("-a", "--num_policy_accuracy_sims", type=int, default=1000,
                         help="Number of policy accuracy simulations (default: 1000)")
+    parser.add_argument("-i", "--iteration", type=int, default=0,
+                        help="Iteration number (default: 0)")
 
     args = parser.parse_args()
 
@@ -195,8 +197,8 @@ if __name__ == "__main__":
     np.random.seed(42)
 
     jani_file_path = f"./mdp_models/{args.mpd_model}.v{args.version}.jani"
-    analysis_path = f"./results/{args.mpd_model.replace('.', '_')}_analysis_test"
-    log_output_path = f"./logs/{args.mpd_model.replace('.', '_')}_learning_log_test.json"
+    analysis_path = f"./results/{args.mpd_model.replace('.', '_')}_analysis_{args.iteration}"
+    log_output_path = f"./logs/{args.mpd_model.replace('.', '_')}_learning_log_{args.iteration}.json"
 
     run_jani_mdp(jani_file_path=jani_file_path,
                  analysis_path=analysis_path,
