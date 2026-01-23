@@ -57,8 +57,8 @@ def create_slurm_script(
     
     slurm_script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
-#SBATCH --output=slurm_logs/slurm_{job_name}_%j.log
-#SBATCH --error=slurm_logs/slurm_{job_name}_%j.err
+#SBATCH --output=slurm/logs/slurm_{job_name}_%j.log
+#SBATCH --error=slurm/logs/slurm_{job_name}_%j.err
 #SBATCH --time=24:00:00
 #SBATCH --account={account}
 #SBATCH --partition=phoenix
@@ -75,10 +75,11 @@ conda activate ltl-reachability
 python main.py -m {mdp_name} -v {version} -c {confidence_error} -p {min_transition_prob} -n {min_num_iterations} -x {max_num_iterations} -t {convergence_threshold} -a {num_policy_accuracy_sims} -i {trial}
 """
     
-    with open(script_name, 'w') as f:
+    script_path = "slurm/jobs/" + script_name
+    with open(script_path, 'w') as f:
         f.write(slurm_script)
     
-    return script_name
+    return script_path
 
 
 def submit_job(script_path):
