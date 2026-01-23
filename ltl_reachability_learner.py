@@ -596,8 +596,10 @@ class LTLReachabilityLearner:
         plt.figure()
         if log_scale:
             plt.semilogy(list(np.array(self.learning_history)[:, -3]), marker='o')
+            plt.ylim(top=2)
         else:
             plt.plot(list(np.array(self.learning_history)[:, -3]), marker='o')
+            plt.ylim(-0.1, 1.1)
         plt.xlabel("Iteration")
         plt.ylabel("Error (U - L)")
         plt.title("Learning Error History")
@@ -609,8 +611,10 @@ class LTLReachabilityLearner:
         plt.figure()
         if log_scale:
             plt.semilogy(list(np.array(self.learning_history)[:, 1]), list(np.array(self.learning_history)[:, -3]))
+            plt.ylim(top=2)
         else:
             plt.plot(list(np.array(self.learning_history)[:, 1]), list(np.array(self.learning_history)[:, -3]))
+            plt.ylim(-0.1, 1.1)
         plt.xlabel("Number of Samples")
         plt.ylabel("Error (U - L)")
         plt.title("Learning Error vs Number of Samples")
@@ -621,12 +625,15 @@ class LTLReachabilityLearner:
     def plot_states_set_history(self, analysis_dir, log_scale=False):
         # plots the learning error history for each iteration and saves it to error_history_plot_path
         num_states_seen_vs_k_plot_path = os.path.join(analysis_dir, "num_states_seen_vs_k.png")
+        max_states = len(self.mdp_sim.gt_mdp.states)
         os.makedirs(analysis_dir, exist_ok=True)
         plt.figure()
         if log_scale:
             plt.semilogy(list(np.array(self.states_set_history)[:, -1]), marker='o')
+            plt.ylim(top=max_states * 2)
         else:
             plt.plot(list(np.array(self.states_set_history)[:, -1]), marker='o')
+            plt.ylim(-0.1 * max_states, max_states * 1.1)
         plt.xlabel("Iteration")
         plt.ylabel("Num Seen States")
         plt.title("Num Seen States History")
@@ -638,8 +645,10 @@ class LTLReachabilityLearner:
         plt.figure()
         if log_scale:
             plt.semilogy(list(np.array(self.states_set_history)[:, 1]), list(np.array(self.states_set_history)[:, -1]))
+            plt.ylim(top=max_states * 2)
         else:
             plt.plot(list(np.array(self.states_set_history)[:, 1]), list(np.array(self.states_set_history)[:, -1]))
+            plt.ylim(-0.1 * max_states, max_states * 1.1)
         plt.xlabel("Number of Samples")
         plt.ylabel("Num Seen States")
         plt.title("Num Seen States vs Number of Samples")
@@ -650,12 +659,15 @@ class LTLReachabilityLearner:
     def plot_transitions_seen_history(self, analysis_dir, log_scale=False):
         # plots the learning error history for each iteration and saves it to error_history_plot_path
         num_transitions_seen_vs_k_plot_path = os.path.join(analysis_dir, "num_transitions_seen_vs_k.png")
+        max_transitions = sum(len(sat_counts) for sat_counts in self.mdp_sim.gt_mdp.transition_probabilities.values())
         os.makedirs(analysis_dir, exist_ok=True)
         plt.figure()
         if log_scale:
             plt.semilogy(list(np.array(self.transitions_seen_history)[:, -1]), marker='o')
+            plt.ylim(top=max_transitions * 2)
         else:
             plt.plot(list(np.array(self.transitions_seen_history)[:, -1]), marker='o')
+            plt.ylim(-0.1 * max_transitions, max_transitions * 1.1)
         plt.xlabel("Iteration")
         plt.ylabel("Num Seen Transitions")
         plt.title("Num Seen Transitions History")
@@ -667,8 +679,10 @@ class LTLReachabilityLearner:
         plt.figure()
         if log_scale:
             plt.semilogy(list(np.array(self.transitions_seen_history)[:, 1]), list(np.array(self.transitions_seen_history)[:, -1]))
+            plt.ylim(top=max_transitions * 2)
         else:
             plt.plot(list(np.array(self.transitions_seen_history)[:, 1]), list(np.array(self.transitions_seen_history)[:, -1]))
+            plt.ylim(-0.1 * max_transitions, max_transitions * 1.1)
         plt.xlabel("Number of Samples")
         plt.ylabel("Num Seen Transitions")
         plt.title("Num Seen Transitions vs Number of Samples")
@@ -684,9 +698,11 @@ class LTLReachabilityLearner:
         if log_scale:
             plt.semilogx(list(np.array(self.policy_accuracy_history)[:, 0]), list(np.array(self.policy_accuracy_history)[:, -1]), marker='o')
             plt.xlabel("Iteration (log scale)")
+            plt.ylim(top=2)
         else:
             plt.plot(list(np.array(self.policy_accuracy_history)[:, 0]), list(np.array(self.policy_accuracy_history)[:, -1]), marker='o')
             plt.xlabel("Iteration")
+            plt.ylim(-0.1, 1.1)
         plt.ylabel("Policy Accuracy")
         plt.title("Policy Accuracy History")
         plt.grid()
@@ -698,9 +714,11 @@ class LTLReachabilityLearner:
         if log_scale:
             plt.semilogy(list(np.array(self.policy_accuracy_history)[:, 1]), list(np.array(self.policy_accuracy_history)[:, -1]))
             plt.xlabel("Number of Samples (log scale)")
+            plt.ylim(top=2)  
         else:
             plt.plot(list(np.array(self.policy_accuracy_history)[:, 1]), list(np.array(self.policy_accuracy_history)[:, -1]))
             plt.xlabel("Number of Samples")
+            plt.ylim(-0.1, 1.1)
         plt.ylabel("Policy Accuracy")
         plt.title("Policy Accuracy vs Number of Samples")
         plt.grid()
@@ -714,8 +732,10 @@ class LTLReachabilityLearner:
         plt.figure()
         if log_scale:
             plt.semilogy(list(np.array(bvi_history)[:, -1]), marker='o')
+            plt.ylim(top=2)
         else:
             plt.plot(list(np.array(bvi_history)[:, -1]), marker='o')
+            plt.ylim(-0.1, 1.1)
         plt.xlabel("Iteration")
         plt.ylabel("Error (U - L)")
         plt.title("BVI Error History")
@@ -739,6 +759,7 @@ class LTLReachabilityLearner:
         
         plt.xlabel("Iteration (k)")
         plt.ylabel("Value")
+        plt.ylim(-0.1, 1.1)
         plt.title("Value Bounds for Initial State vs Iteration")
         plt.legend()
         plt.grid()
@@ -759,6 +780,7 @@ class LTLReachabilityLearner:
         
         plt.xlabel("Number of Samples")
         plt.ylabel("Value")
+        plt.ylim(-0.1, 1.1)
         plt.title("Value Bounds for Initial State vs Number of Samples")
         plt.legend()
         plt.grid()
@@ -953,7 +975,7 @@ class LTLReachabilityLearner:
                 print(f"  {record[0]}, {record[1]}, {record[-3]}, {self.states_set_history[i][-1]}, {self.transitions_seen_history[i][-1]}, {self.policy_accuracy_history[i][-1]}, {record[-3]}, {record[-2]}, {record[-1]}")
         
 
-    def has_converged(self, curr_mdp, prev_iter_history, prev_collapsed_mdp_MEC_states=None, threshold=0.0001):
+    def has_converged(self, curr_mdp, prev_iter_history, prev_collapsed_mdp_MEC_states=None, threshold=0.0005, min_iterations=5, max_iterations=100):
         """
         Check if the learning process has converged based on the change in MDP error.
         
@@ -977,8 +999,10 @@ class LTLReachabilityLearner:
                 return False
         
         prev_k, prev_total_num_samples, prev_delta, prev_p_min, prev_error, prev_l, prev_u =  prev_iter_history
-        if (prev_k < 3):
-            return False  # Need at least 3 iterations to check for convergence
+        if (max_iterations and prev_k >= max_iterations):
+            return True  # Reached maximum number of iterations
+        if (min_iterations and prev_k < min_iterations):
+            return False  # Need at least 'min_iterations' iterations to check for convergence
         test_mdp = copy.deepcopy(curr_mdp)
         test_mdp.confidence_error = prev_delta
         test_mdp.p_min = prev_p_min
