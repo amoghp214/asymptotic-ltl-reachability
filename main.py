@@ -144,7 +144,7 @@ def ij10_jani_mdp():
 
 
 
-def run_jani_mdp(jani_file_path, analysis_path, log_output_path, true_confidence_error, true_p_min):
+def run_jani_mdp(jani_file_path, analysis_path, log_output_path, true_confidence_error, true_p_min, min_num_iterations, max_num_iterations, convergence_threshold, num_policy_accuracy_sims):
     """
     Example 1: Simple 3-state MDP from JANI file
     States: 0, 1, 2 (2 is goal)
@@ -157,7 +157,13 @@ def run_jani_mdp(jani_file_path, analysis_path, log_output_path, true_confidence
     mdp_sim = MDPSimulator(mdp=convert_jani_to_mdp(jani_file_path))
 
     # Create learner
-    learner = LTLReachabilityLearner(mdp_simulator=mdp_sim)
+    learner = LTLReachabilityLearner(
+        mdp_simulator=mdp_sim, 
+        min_num_iterations=min_num_iterations, 
+        max_num_iterations=max_num_iterations, 
+        convergence_threshold=convergence_threshold,
+        num_policy_accuracy_sims=num_policy_accuracy_sims
+    )
 
     print("================= Starting Learning Process =================")
     learner.learn(analysis_path)
@@ -174,6 +180,14 @@ if __name__ == "__main__":
                         help="True confidence error (default: 0.01)")
     parser.add_argument("-p", "--true_p_min", type=float, default=0.01,
                         help="True p_min (default: 0.01)")
+    parser.add_argument("-n", "--min_num_iterations", type=int, default=5,
+                        help="Minimum number of iterations (default: 5)")
+    parser.add_argument("-x", "--max_num_iterations", type=int, default=50,
+                        help="Maximum number of iterations (default: 50)")
+    parser.add_argument("-t", "--convergence_threshold", type=float, default=0.001,
+                        help="Convergence threshold (default: 0.001)")
+    parser.add_argument("-a", "--num_policy_accuracy_sims", type=int, default=1000,
+                        help="Number of policy accuracy simulations (default: 1000)")
 
     args = parser.parse_args()
 
@@ -188,7 +202,11 @@ if __name__ == "__main__":
                  analysis_path=analysis_path,
                  log_output_path=log_output_path,
                  true_confidence_error=args.true_confidence_error,
-                 true_p_min=args.true_p_min)
+                 true_p_min=args.true_p_min,
+                 min_num_iterations=args.min_num_iterations,
+                 max_num_iterations=args.max_num_iterations,
+                 convergence_threshold=args.convergence_threshold,
+                 num_policy_accuracy_sims=args.num_policy_accuracy_sims)
 
     
     print("\n" + "="*60)
