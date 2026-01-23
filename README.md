@@ -49,8 +49,24 @@ ltl-reachability/
 
 ## Installation
 
+### Using Conda (Recommended)
+
+Create a conda environment with all dependencies:
+
 ```bash
-pip install numpy  # Only external dependency
+conda env create -f environment.yaml
+conda activate ltl-reachability
+```
+
+To update an existing environment:
+```bash
+conda env update -f environment.yaml --prune
+```
+
+### Manual Installation
+
+```bash
+pip install numpy matplotlib tqdm
 ```
 
 ## Quick Start

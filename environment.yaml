@@ -1,0 +1,12 @@
+name: ltl-reachability
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy
+  - matplotlib
+  - tqdm
+  - pip
+  - pip:
+    # No additional pip packages needed - all dependencies are available via conda
