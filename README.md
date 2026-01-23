@@ -1,6 +1,6 @@
 # LTL-Reachability: PAC Statistical Model Checking
 
-Implementation of "PAC Statistical Model Checking for Markov Decision Processes and Stochastic Games" (Ashok, Křetínský, Weininger 2019, arXiv:1905.04403).
+Implementation of novel algorithm to guarantee asymptotic reachability of LTL specifications for black box models. Theoretically, the optimal policy is found with 100% confidence. Research submitted to ICML 2026.
 
 This codebase provides an end-to-end framework for learning reachability objectives in Markov Decision Processes with **Probably Approximately Correct (PAC)** guarantees, requiring only:
 - A simulator/environment (no knowledge of transition function)
