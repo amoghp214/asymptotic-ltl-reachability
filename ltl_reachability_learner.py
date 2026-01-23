@@ -811,6 +811,17 @@ class LTLReachabilityLearner:
         self.plot_transitions_seen_history(analysis_dir)
         self.plot_policy_accuracy_history(analysis_dir)
         self.plot_value_bounds(analysis_dir)
+
+        # Save all histories to json file
+        analysis_data = {
+            "learning_history": self.learning_history,
+            "states_set_history": self.states_set_history,
+            "transitions_seen_history": self.transitions_seen_history,
+            "policy_accuracy_history": self.policy_accuracy_history,
+        }
+        analysis_data_path = os.path.join(analysis_dir, "analysis_data.json")
+        with open(analysis_data_path, "w") as f:
+            json.dump(analysis_data, f, indent=4)
     
     def print_learner_results(self, k, confidence_error_k, error_k, p_k):
         print(f"\nLearning interrupted by user on iteration {k}. Saving progress and exiting safely...")
