@@ -246,12 +246,13 @@ class LTLReachabilityLearner:
         staying_state_action_pairs = self._get_staying_state_action_pairs(curr_mdp, ec_candidate)
         
         # Check if all staying pairs have enough samples. If not, gather more samples.
-        for (state, action) in staying_state_action_pairs:
-            total_samples = curr_mdp.get_sample_count(state, action)  # NOTE: curr_mdp == discovered_mdp so we stop doing this: + self.discovered_mdp.get_sample_count(state, action) # we need to see if there are enoughs samples from all seen samples
+        for (state, action) in tqdm(list(staying_state_action_pairs),
+                        desc="Gathering enough samples for EC detection",
+                        unit="sa-pair"):
+            total_samples = curr_mdp.get_sample_count(state, action)
             if total_samples < min_num_samples:
-                # return False  # Not enough samples to confidently detect
-                num_needed_samples = min_num_samples - total_samples
-                for _ in tqdm(range(max(0, int(num_needed_samples))), desc=f"EC samples for {(state, action)}", unit="sample"):
+                num_needed_samples = int(min_num_samples - total_samples + 1)
+                for _ in range(num_needed_samples):
                     next_state, reward = self.mdp_sim.step(state, action)
                     if (next_state not in self.discovered_mdp.states):
                         self.add_gt_state_and_actions_to_mdp(self.discovered_mdp, next_state, is_goal=(reward == 1))
@@ -573,19 +574,22 @@ class LTLReachabilityLearner:
                             )
                         )
                     )
+                
+                if (analysis_dir != ""):
+                        self.run_analysis(analysis_dir)
 
                 print("Error:", self.learning_history[-1])
                 
                 if (k > 1 and self.has_converged(collapsed_discovered_mdp, self.learning_history[-2], prev_collapsed_mdp_MEC_states)):  # NOTE: -2 because we want the one before the current iteration (current iteration is -1 index).
                     print("Algorithm has converged, exiting...")
-                    if (analysis_dir != ""):
-                        self.run_analysis(analysis_dir)
+                    # if (analysis_dir != ""):
+                    #     self.run_analysis(analysis_dir)
                     break
 
                 prev_collapsed_mdp_MEC_states = collapsed_discovered_mdp.MEC_states.copy()
             except KeyboardInterrupt:
-                if (analysis_dir != ""):
-                    self.run_analysis(analysis_dir)
+                # if (analysis_dir != ""):
+                #     self.run_analysis(analysis_dir)
                 break
             
 
