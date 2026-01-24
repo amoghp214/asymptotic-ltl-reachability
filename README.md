@@ -7,43 +7,32 @@ This codebase provides an end-to-end framework for learning reachability objecti
 - An error tolerance parameter (δ)
 - A lower bound on minimum transition probability (p_min)
 
-## Features
-
-✅ **All Algorithms Implemented:**
-1. **ErrorBound** - Calculate margin of error for probability estimates
-2. **DistributeError** - Distribute error budget across state-action pairs
-3. **LowerBound** - Compute lower bound on transition probability
-4. **EstimateTransition** - Estimate transition probabilities from samples
-5. **UpdateBVIBounds** - Update value bounds for a single state (Bounded Value Iteration)
-6. **BVI** - Bounded Value Iteration for all states
-7. **NumSamplesEC** - Calculate samples needed for end component detection
-8. **IsStayingPair** - Check if state-action pair stays within a set
-9. **GetStayingPairs** - Get all staying state-action pairs
-10. **ConfidentlyDetectEC** - Detect end components with PAC guarantees
-11. **FindSCCs** - Find strongly connected components (Tarjan's algorithm)
-12. **GetStayingMDP** - Extract sub-MDP with staying transitions
-13. **FindAllECs** - Recursively find all end components
-14. **DetectLoop** - Detect loops that prevent goal reachability
-
 ## Project Structure
 
 ```
 ltl-reachability/
-├── mdp.py                  # MDP class with state, action, and transition management
-├── algorithm.py            # Core algorithms (all 14 algorithms)
-├── main.py                 # End-to-end learner and examples
-├── test_algorithms.py      # Comprehensive unit tests
-├── logs/                   # Execution logs and learning traces
-│   └── *.log               # Timestamped log files with algorithm progress
-├── mdp_models/             # Discovered MDP models (JSON format)
-│   └── *.json              # Learned transition functions from simulations
-├── plots/                  # Visualization outputs
-│   ├── *.png               # Generated plots and graphs
-│   └── *.pdf               # High-quality plot exports
-├── results/                # Final numerical results and statistics
-│   ├── *.csv               # Tabular results for analysis
-│   └── *.json              # Structured result data
-├── README.md               # This file
+├── mdp.py                        # MDP class with state, action, and transition management
+├── ltl_reachability_learner.py   # Class used to run the algorithm and extract the optimal policy for the MDP
+├── main.py                       # End-to-end learner and examples
+├── convert_jani_to_mdp.py        # Converts PRISM MDP automata benchmarks in the JANI format to the MDP class
+├── test_algorithms.py            # Comprehensive unit tests for the algorithm
+├── test_mdp.py                   # Comprehensive unit tests for the MDP class
+├── mdp_benchmark_dispatcher.py   # Runs PRISM MDP benchmark SLURM jobs
+├── logs/                         # Execution logs and learning traces
+│   └── *.log                     # Timestamped log files with algorithm progress
+├── mdp_models/                   # Discovered MDP models (JSON format)
+│   └── *.json                    # Learned transition functions from simulations
+├── plots/                        # Visualization outputs
+│   ├── *.png                     # Generated plots and graphs
+│   └── *.pdf                     # High-quality plot exports
+├── results/                      # Final numerical results and statistics
+│   ├── *.csv                     # Tabular results for analysis
+│   └── *.json                    # Structured result data
+├── slurm/                        # SLURM job data
+│   ├── jobs/*.sh                 # All bash files for slurm jobs dispatched
+│   └── logs/*                    # Log and error files for slurm jobs
+├── environment.yaml              # Details the required packages for this repository
+├── README.md                     # This file
 └── LICENSE
 ```
 
@@ -79,18 +68,14 @@ The `main.py` file contains the complete learning pipeline with several built-in
 python main.py
 ```
 
-This executes three example scenarios:
+This executes any learning objective for PRISM MDP benchmarks that are in the JANI file format. For example:
 
-1. **Simple 3-State MDP** - Basic example with two actions
-   - Demonstrates core reachability learning
-   - Shows how to set up a simple simulator
-   
-2. **IJ 3 PRISM Baseline** - PRISM case study task with stochasticity
+1. **IJ 3 PRISM Baseline** - PRISM case study task with stochasticity
    - 32 states
    - Lesser complex state-action space
    - Toy example
    
-3. **IJ 10 PRISM Baseline** - PRISM benchmark task with stochasticity
+2. **IJ 10 PRISM Baseline** - PRISM benchmark task with stochasticity
    - 1024 states
    - Complex task
    - Requires millions of samples to start converging
@@ -203,6 +188,7 @@ Visualization outputs including:
 - **Seen states over time**: The number of states seen in the partial MDP over algorithmic iterations and sampling
 - **Seen transitions over time**: The number of transitions seen in the partial MDP over algorithmic iterations and sampling
 - **MDP policy accuracy over time**: The accuracy of the learned MDP policy over algorithmic iterations and sampling
+- **Results History**: The history of the analysis results over all main-loop iterations
 
 **Formats**: PNG (quick viewing)
 
@@ -267,18 +253,6 @@ Essential for stochastic systems where the agent might get trapped in cycles. We
 1. Detect potential loops via SCC analysis
 2. Require sufficient samples to confirm
 3. Deflate ECs by marking them as unrewarding -->
-
-## Algorithm Parameters
-
-**error_tolerance (δ)**: 
-- Smaller → More samples needed for same accuracy
-- Typical values: 0.01 to 0.1
-
-**p_min**:
-- Minimum transition probability to detect
-- If system has transitions with probability < p_min, algorithm may miss them
-- Typical values: 0.01 to 0.1
-
 
 ## Example: Simple 3-State MDP
 
