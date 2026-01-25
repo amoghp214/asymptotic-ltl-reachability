@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 
 from mdp import MDP
 from mdp_simulator import MDPSimulator
+from analysis_utils import run_analysis, plot_bvi_history
 from tqdm import tqdm
 import json
 import os
@@ -17,13 +18,28 @@ class LTLReachabilityLearner:
     Main learner class that orchestrates PAC learning of LTL reachability.
     """
     
-    def __init__(self, mdp_simulator: MDPSimulator, min_num_iterations=5, max_num_iterations=50, convergence_threshold=0.001, num_policy_accuracy_sims=1000):
+    def __init__(
+        self, 
+        mdp_simulator: MDPSimulator, 
+        min_num_iterations=5, 
+        max_num_iterations=50, 
+        convergence_threshold=0.001, 
+        num_policy_accuracy_sims=1000,
+        true_confidence_error=0.01,
+        true_p_min=0.01
+    ):
         """
         Initialize the learner.
         
         Args:
-            error_tolerance: Acceptable error tolerance (PAC parameter delta).
-            p_min: Minimum transition probability bound (required by algorithm).
+            mdp_simulator (MDPSimulator): The MDP simulator to interact with the true MDP.
+            min_num_iterations (int): Minimum number of learning iterations.
+            max_num_iterations (int): Maximum number of learning iterations.
+            convergence_threshold (float): Threshold for convergence based on error.
+            num_policy_accuracy_sims (int): Number of simulations to estimate policy accuracy.
+            true_confidence_error (float): FOR ANALYSIS PURPOSES ONLY
+            true_p_min (float): FOR ANALYSIS PURPOSES ONLY
+
         """
         self.discovered_mdp = MDP()  # Partial MDP
         self.mdp_sim = mdp_simulator  # Nests the true MDP
@@ -32,11 +48,14 @@ class LTLReachabilityLearner:
         self.states_set_history = []  # [(k, num_samples, seen_states_set), ...]
         self.transitions_seen_history = []  # [(k, num_samples, transitions_seen), ...]
         self.policy_accuracy_history = []  # [(k, num_samples, policy_accuracy), ..x.]
+        self.true_error_history = []  # [(k, num_samples, true_error), ...]  FOR ANALYSIS PURPOSES ONLY - using the true p_min and true confidence error
 
         self.min_num_iterations = min_num_iterations
         self.max_num_iterations = max_num_iterations
         self.convergence_threshold = convergence_threshold
         self.num_policy_accuracy_sims = num_policy_accuracy_sims
+        self.true_confidence_error = true_confidence_error  # FOR ANALYSIS PURPOSES ONLY - not used by the algorithm
+        self.true_p_min = true_p_min  # FOR ANALYSIS PURPOSES ONLY - not used by the algorithm
     
     def _is_staying_state_action_pair(self, curr_mdp, state_set, state, action):
         """
@@ -555,7 +574,7 @@ class LTLReachabilityLearner:
                               desc=f"BVI k={k}", unit="it"):
                     collapsed_discovered_mdp.bvi_update()
                     bvi_history.append([k, confidence_error_k, p_k, collapsed_discovered_mdp.get_mdp_error()])
-                self.plot_bvi_history(bvi_history, analysis_dir)
+                plot_bvi_history(analysis_dir=analysis_dir, bvi_history=bvi_history)
 
                 collapsed_discovered_mdp.update_learned_policy()
 
@@ -568,7 +587,7 @@ class LTLReachabilityLearner:
                 self.learning_history.append([k, total_sample_counts, confidence_error_k, p_k, curr_error, lower_bound, upper_bound])
 
                 if (analysis_dir != ""):
-                    # self.policy_accuracy_history.append((k, total_sample_counts, confidence_error_k, p_k, self.calculate_policy_accuracy(collapsed_discovered_mdp, max_steps=int(len(self.mdp_sim.gt_mdp.states)**2 / p_k))))  # TODO: use the number of gt MDP states or discovered MDP states?
+                    # Calculate policy accuracy
                     self.policy_accuracy_history.append(
                         (k, 
                          total_sample_counts, 
@@ -581,247 +600,42 @@ class LTLReachabilityLearner:
                         )
                     )
                 
-                if (analysis_dir != ""):
-                        self.run_analysis(analysis_dir)
+                    # Get the true error of the learned MDP - FOR ANALYSIS PURPOSES ONLY
+                    test_mdp = copy.deepcopy(collapsed_discovered_mdp)
+                    test_mdp.confidence_error = self.true_confidence_error
+                    test_mdp.p_min = self.true_p_min
+                    test_mdp.update_transition_probabilities()
+                    for _ in range(0, self.num_bvi_iterations(len(test_mdp.states), k)):
+                        test_mdp.bvi_update()
+                    curr_error = test_mdp.get_mdp_error()
+                    self.true_error_history.append((k, total_sample_counts, curr_error))
+                    del test_mdp  # free memory
+
+                    # Run iteration analysis, save plots and data
+                    run_analysis(
+                        analysis_dir=analysis_dir,
+                        learning_history=self.learning_history,
+                        states_set_history=self.states_set_history,
+                        transitions_seen_history=self.transitions_seen_history,
+                        policy_accuracy_history=self.policy_accuracy_history,
+                        true_error_history=self.true_error_history,
+                        max_states=len(self.mdp_sim.gt_mdp.states),
+                        max_transitions=sum(len(sat_counts) for sat_counts in self.mdp_sim.gt_mdp.transition_probabilities.values()),
+                        true_confidence_error=self.true_confidence_error,
+                        true_p_min=self.true_p_min
+                    )
 
                 print("Error:", self.learning_history[-1])
                 
                 if (k > 1 and self.has_converged(collapsed_discovered_mdp, self.learning_history[-2], prev_collapsed_mdp_MEC_states)):  # NOTE: -2 because we want the one before the current iteration (current iteration is -1 index).
                     print("Algorithm has converged, exiting...")
-                    # if (analysis_dir != ""):
-                    #     self.run_analysis(analysis_dir)
                     break
 
                 prev_collapsed_mdp_MEC_states = collapsed_discovered_mdp.MEC_states.copy()
             except KeyboardInterrupt:
-                # if (analysis_dir != ""):
-                #     self.run_analysis(analysis_dir)
+                print("Learning interrupted by user. Exiting and saving progress...")
                 break
-            
 
-    def plot_error_history(self, analysis_dir, log_scale=False):
-        # plots the learning error history for each iteration and saves it to error_history_plot_path
-        error_vs_k_plot_path = os.path.join(analysis_dir, "error_vs_k.png")
-        os.makedirs(analysis_dir, exist_ok=True)
-        plt.figure()
-        if log_scale:
-            plt.semilogy(list(np.array(self.learning_history)[:, -3]), marker='o')
-            plt.ylim(top=2)
-        else:
-            plt.plot(list(np.array(self.learning_history)[:, -3]), marker='o')
-            plt.ylim(-0.1, 1.1)
-        plt.xlabel("Iteration")
-        plt.ylabel("Error (U - L)")
-        plt.title("Learning Error History")
-        plt.grid()
-        plt.savefig(error_vs_k_plot_path)
-        plt.close()
-
-        error_vs_samples_plot_path = os.path.join(analysis_dir, "error_vs_samples.png")
-        plt.figure()
-        if log_scale:
-            plt.semilogy(list(np.array(self.learning_history)[:, 1]), list(np.array(self.learning_history)[:, -3]))
-            plt.ylim(top=2)
-        else:
-            plt.plot(list(np.array(self.learning_history)[:, 1]), list(np.array(self.learning_history)[:, -3]))
-            plt.ylim(-0.1, 1.1)
-        plt.xlabel("Number of Samples")
-        plt.ylabel("Error (U - L)")
-        plt.title("Learning Error vs Number of Samples")
-        plt.grid()
-        plt.savefig(error_vs_samples_plot_path)
-        plt.close()
-
-    def plot_states_set_history(self, analysis_dir, log_scale=False):
-        # plots the learning error history for each iteration and saves it to error_history_plot_path
-        num_states_seen_vs_k_plot_path = os.path.join(analysis_dir, "num_states_seen_vs_k.png")
-        max_states = len(self.mdp_sim.gt_mdp.states)
-        os.makedirs(analysis_dir, exist_ok=True)
-        plt.figure()
-        if log_scale:
-            plt.semilogy(list(np.array(self.states_set_history)[:, -1]), marker='o')
-            plt.ylim(top=max_states * 2)
-        else:
-            plt.plot(list(np.array(self.states_set_history)[:, -1]), marker='o')
-            plt.ylim(-0.1 * max_states, max_states * 1.1)
-        plt.xlabel("Iteration")
-        plt.ylabel("Num Seen States")
-        plt.title("Num Seen States History")
-        plt.grid()
-        plt.savefig(num_states_seen_vs_k_plot_path)
-        plt.close()
-
-        num_states_seen_vs_samples_plot_path = os.path.join(analysis_dir, "num_states_seen_vs_samples.png")
-        plt.figure()
-        if log_scale:
-            plt.semilogy(list(np.array(self.states_set_history)[:, 1]), list(np.array(self.states_set_history)[:, -1]))
-            plt.ylim(top=max_states * 2)
-        else:
-            plt.plot(list(np.array(self.states_set_history)[:, 1]), list(np.array(self.states_set_history)[:, -1]))
-            plt.ylim(-0.1 * max_states, max_states * 1.1)
-        plt.xlabel("Number of Samples")
-        plt.ylabel("Num Seen States")
-        plt.title("Num Seen States vs Number of Samples")
-        plt.grid()
-        plt.savefig(num_states_seen_vs_samples_plot_path)
-        plt.close()
-
-    def plot_transitions_seen_history(self, analysis_dir, log_scale=False):
-        # plots the learning error history for each iteration and saves it to error_history_plot_path
-        num_transitions_seen_vs_k_plot_path = os.path.join(analysis_dir, "num_transitions_seen_vs_k.png")
-        max_transitions = sum(len(sat_counts) for sat_counts in self.mdp_sim.gt_mdp.transition_probabilities.values())
-        os.makedirs(analysis_dir, exist_ok=True)
-        plt.figure()
-        if log_scale:
-            plt.semilogy(list(np.array(self.transitions_seen_history)[:, -1]), marker='o')
-            plt.ylim(top=max_transitions * 2)
-        else:
-            plt.plot(list(np.array(self.transitions_seen_history)[:, -1]), marker='o')
-            plt.ylim(-0.1 * max_transitions, max_transitions * 1.1)
-        plt.xlabel("Iteration")
-        plt.ylabel("Num Seen Transitions")
-        plt.title("Num Seen Transitions History")
-        plt.grid()
-        plt.savefig(num_transitions_seen_vs_k_plot_path)
-        plt.close()
-
-        num_transitions_seen_vs_samples_plot_path = os.path.join(analysis_dir, "num_transitions_seen_vs_samples.png")
-        plt.figure()
-        if log_scale:
-            plt.semilogy(list(np.array(self.transitions_seen_history)[:, 1]), list(np.array(self.transitions_seen_history)[:, -1]))
-            plt.ylim(top=max_transitions * 2)
-        else:
-            plt.plot(list(np.array(self.transitions_seen_history)[:, 1]), list(np.array(self.transitions_seen_history)[:, -1]))
-            plt.ylim(-0.1 * max_transitions, max_transitions * 1.1)
-        plt.xlabel("Number of Samples")
-        plt.ylabel("Num Seen Transitions")
-        plt.title("Num Seen Transitions vs Number of Samples")
-        plt.grid()
-        plt.savefig(num_transitions_seen_vs_samples_plot_path)
-        plt.close()
-    
-    def plot_policy_accuracy_history(self, analysis_dir, log_scale=False):
-        # plots the learning error history for each iteration and saves it to error_history_plot_path
-        policy_accuracy_vs_k_plot_path = os.path.join(analysis_dir, "policy_accuracy_vs_k.png")
-        os.makedirs(analysis_dir, exist_ok=True)
-        plt.figure()
-        if log_scale:
-            plt.semilogx(list(np.array(self.policy_accuracy_history)[:, 0]), list(np.array(self.policy_accuracy_history)[:, -1]), marker='o')
-            plt.xlabel("Iteration (log scale)")
-            plt.ylim(top=2)
-        else:
-            plt.plot(list(np.array(self.policy_accuracy_history)[:, 0]), list(np.array(self.policy_accuracy_history)[:, -1]), marker='o')
-            plt.xlabel("Iteration")
-            plt.ylim(-0.1, 1.1)
-        plt.ylabel("Policy Accuracy")
-        plt.title("Policy Accuracy History")
-        plt.grid()
-        plt.savefig(policy_accuracy_vs_k_plot_path)
-        plt.close()
-
-        policy_accuracy_vs_samples_plot_path = os.path.join(analysis_dir, "policy_accuracy_vs_samples.png")
-        plt.figure()
-        if log_scale:
-            plt.semilogy(list(np.array(self.policy_accuracy_history)[:, 1]), list(np.array(self.policy_accuracy_history)[:, -1]))
-            plt.xlabel("Number of Samples (log scale)")
-            plt.ylim(top=2)  
-        else:
-            plt.plot(list(np.array(self.policy_accuracy_history)[:, 1]), list(np.array(self.policy_accuracy_history)[:, -1]))
-            plt.xlabel("Number of Samples")
-            plt.ylim(-0.1, 1.1)
-        plt.ylabel("Policy Accuracy")
-        plt.title("Policy Accuracy vs Number of Samples")
-        plt.grid()
-        plt.savefig(policy_accuracy_vs_samples_plot_path)
-        plt.close()
-
-    def plot_bvi_history(self, bvi_history, analysis_dir, log_scale=False):
-        # plots the learning error history for each iteration and saves it to error_history_plot_path
-        error_history_plot_path = os.path.join(analysis_dir, "bvi_error_history.png")
-        os.makedirs(analysis_dir, exist_ok=True)
-        plt.figure()
-        if log_scale:
-            plt.semilogy(list(np.array(bvi_history)[:, -1]), marker='o')
-            plt.ylim(top=2)
-        else:
-            plt.plot(list(np.array(bvi_history)[:, -1]), marker='o')
-            plt.ylim(-0.1, 1.1)
-        plt.xlabel("Iteration")
-        plt.ylabel("Error (U - L)")
-        plt.title("BVI Error History")
-        plt.grid()
-        plt.savefig(error_history_plot_path)
-        plt.close()
-    
-    def plot_value_bounds(self, analysis_dir):
-        """Plot lower and upper bounds vs iteration k and vs number of samples."""
-        bounds_vs_k_plot_path = os.path.join(analysis_dir, "value_bounds_vs_k.png")
-        os.makedirs(analysis_dir, exist_ok=True)
-        plt.figure(figsize=(10, 6))
-        
-        k_values = list(np.array(self.learning_history)[:, 0])
-        lower_bounds = list(np.array(self.learning_history)[:, -2])
-        upper_bounds = list(np.array(self.learning_history)[:, -1])
-        
-        plt.plot(k_values, lower_bounds, marker='o', label='Lower Bound L(s0)', linewidth=2)
-        plt.plot(k_values, upper_bounds, marker='s', label='Upper Bound U(s0)', linewidth=2)
-        plt.fill_between(k_values, lower_bounds, upper_bounds, alpha=0.2)
-        
-        plt.xlabel("Iteration (k)")
-        plt.ylabel("Value")
-        plt.ylim(-0.1, 1.1)
-        plt.title("Value Bounds for Initial State vs Iteration")
-        plt.legend()
-        plt.grid()
-        plt.savefig(bounds_vs_k_plot_path)
-        plt.close()
-
-        bounds_vs_samples_plot_path = os.path.join(analysis_dir, "value_bounds_vs_samples.png")
-        os.makedirs(analysis_dir, exist_ok=True)
-        plt.figure(figsize=(10, 6))
-        
-        sample_counts = list(np.array(self.learning_history)[:, 1])
-        lower_bounds = list(np.array(self.learning_history)[:, -2])
-        upper_bounds = list(np.array(self.learning_history)[:, -1])
-        
-        plt.plot(sample_counts, lower_bounds, marker='o', label='Lower Bound L(s0)', linewidth=2)
-        plt.plot(sample_counts, upper_bounds, marker='s', label='Upper Bound U(s0)', linewidth=2)
-        plt.fill_between(sample_counts, lower_bounds, upper_bounds, alpha=0.2)
-        
-        plt.xlabel("Number of Samples")
-        plt.ylabel("Value")
-        plt.ylim(-0.1, 1.1)
-        plt.title("Value Bounds for Initial State vs Number of Samples")
-        plt.legend()
-        plt.grid()
-        plt.savefig(bounds_vs_samples_plot_path)
-        plt.close()
-
-    def run_analysis(self, analysis_dir):
-        """
-        Run analysis and generate plots for the learning process.
-
-        Args:
-            analysis_dir (str): Directory to save analysis plots and data.
-        """
-        if not os.path.exists(analysis_dir):
-            os.makedirs(analysis_dir)
-        self.plot_error_history(analysis_dir, log_scale=True)
-        self.plot_states_set_history(analysis_dir)
-        self.plot_transitions_seen_history(analysis_dir)
-        self.plot_policy_accuracy_history(analysis_dir)
-        self.plot_value_bounds(analysis_dir)
-
-        # Save all histories to json file
-        analysis_data = {
-            "learning_history": self.learning_history,
-            "states_set_history": self.states_set_history,
-            "transitions_seen_history": self.transitions_seen_history,
-            "policy_accuracy_history": self.policy_accuracy_history,
-        }
-        analysis_data_path = os.path.join(analysis_dir, "analysis_data.json")
-        with open(analysis_data_path, "w") as f:
-            json.dump(analysis_data, f, indent=4)
     
     def print_learner_results(self, k, confidence_error_k, error_k, p_k):
         print(f"\nLearning interrupted by user on iteration {k}. Saving progress and exiting safely...")
@@ -862,7 +676,7 @@ class LTLReachabilityLearner:
                   desc="Final BVI", unit="it"):
             collapsed_discovered_mdp.bvi_update()
             bvi_history.append([_, true_confidence_error, true_p_min, collapsed_discovered_mdp.get_mdp_error()])
-        self.plot_bvi_history(bvi_history, analysis_dir)
+        plot_bvi_history(analysis_dir=analysis_dir, bvi_history=bvi_history)
         collapsed_discovered_mdp.update_learned_policy()
         print("Error after final BVI:", collapsed_discovered_mdp.get_mdp_error())
 

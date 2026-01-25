@@ -162,7 +162,9 @@ def run_jani_mdp(jani_file_path, analysis_path, log_output_path, true_confidence
         min_num_iterations=min_num_iterations, 
         max_num_iterations=max_num_iterations, 
         convergence_threshold=convergence_threshold,
-        num_policy_accuracy_sims=num_policy_accuracy_sims
+        num_policy_accuracy_sims=num_policy_accuracy_sims,
+        true_confidence_error=true_confidence_error,
+        true_p_min=true_p_min
     )
 
     print("================= Starting Learning Process =================")
