@@ -59,7 +59,7 @@ def create_slurm_script(
 #SBATCH --job-name={job_name}
 #SBATCH --output=slurm/logs/slurm_{job_name}_%j.log
 #SBATCH --error=slurm/logs/slurm_{job_name}_%j.err
-#SBATCH --time=24:00:00
+#SBATCH --time=36:00:00
 #SBATCH --account={account}
 #SBATCH --partition=phoenix
 #SBATCH --nodes=1
