@@ -228,7 +228,7 @@ class MDP:
             action: Action taken
         """
         transition_probability_confidence_error = self._calculate_transition_probability_confidence_error()
-        c = self._calculate_transition_probability_confidence_width(state, action, transition_probability_confidence_error)
+        c = self._calculate_transition_probability_confidence_width(state, action, transition_probability_confidence_error, two_sided_hoeffding=True)
         num_state_action_samples = self.get_sample_count(state, action)
         estimated_transition_probabilities = dict()
         for next_state, num_transitions in self.sample_counts[(state, action)].items():
@@ -314,7 +314,7 @@ class MDP:
         error_tolerance = (self.confidence_error * self.p_min) / len(self.state_action_pairs)
         return error_tolerance
     
-    def _calculate_transition_probability_confidence_width(self, state, action, confidence_error):
+    def _calculate_transition_probability_confidence_width(self, state, action, confidence_error, two_sided_hoeffding=False):
         """
         Calculate the margin of error for an estimated transition probability
         using Chernoff bound (Algorithm 1: ErrorBound).
@@ -332,7 +332,10 @@ class MDP:
         num_samples = self.get_sample_count(state, action)
         if (num_samples == 0):
             return 1
-        c = np.sqrt(np.log(1.0 / confidence_error) / (2.0 * num_samples))
+        if two_sided_hoeffding:
+            c = np.sqrt(np.log(2.0 / confidence_error) / (2.0 * num_samples))
+        else:
+            c = np.sqrt(np.log(1.0 / confidence_error) / (2.0 * num_samples))
         return c
     
     def get_state_action_value_bounds(self, state, action):
