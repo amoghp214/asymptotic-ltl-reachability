@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 from statistics import median
 from collections import defaultdict
+from matplotlib import pyplot as plt
+import numpy as np
 
 from analysis_utils import run_analysis
 
@@ -140,12 +142,146 @@ def save_results(results, base_output_dir='./analysis/'):
         
         print(f"{benchmark_name} results saved to {output_file}")
     
+def plot_error_stdev_curve(final_results, raw_results, output_dir='./analysis/'):
+    for benchmark_name in final_results.keys():
+        os.makedirs(os.path.join(output_dir, benchmark_name), exist_ok=True)
+        output_path = Path(output_dir) / benchmark_name
+        output_path.mkdir(parents=True, exist_ok=True)
+        analysis_dir = str(output_path)
+        learning_history = final_results[benchmark_name]['learning_history']
+        # calculate stdev of error at each iteration across trials for a benchmark
+        error_stdev_history = []
+        num_trials = len(raw_results[benchmark_name])
+        max_iterations_done = len(learning_history)
+        for i in range(max_iterations_done):
+            errors_at_i = []
+            for trial_data in raw_results[benchmark_name].values():
+                if len(trial_data['learning_history']) > i:
+                    errors_at_i.append(trial_data['learning_history'][i][-3])
+            if errors_at_i:
+                stdev_i = np.std(errors_at_i)
+                error_stdev_history.append((i + 1, stdev_i))
+            else:
+                error_stdev_history.append((i + 1, 0.0))
+        plot_error_history_w_stdev(analysis_dir, learning_history, error_stdev_history, log_scale=False)
+
+
+def plot_error_history_w_stdev(analysis_dir, learning_history, error_stdev_history, log_scale=False):
+    # plots the learning error history for each iteration and saves it to error_history_plot_path
+    # Prepare arrays for plotting and create wrappers that inject the stdev shaded area
+    arr = np.array(learning_history)
+    if arr.size == 0:
+        return
+
+    y_arr = arr[:, -3].astype(float)
+    x_idx = np.arange(len(y_arr))
+
+    # Align stdevs to the learning_history indices. error_stdev_history is [(k, stdev), ...]
+    if error_stdev_history:
+        ks = [int(t[0]) for t in error_stdev_history]
+        min_k = min(ks)
+        stdev_map = {int(k): float(s) for k, s in error_stdev_history}
+        stdevs = np.array([stdev_map.get(i + min_k, 0.0) for i in range(len(y_arr))], dtype=float)
+    else:
+        stdevs = np.zeros_like(y_arr)
+
+    # function to draw translucent, per-segment colored fill between (y - stdev) and (y + stdev)
+    def _draw_shaded(ax, x, y, s, log_scale):
+        upper = y + s
+        lower = y - s
+        if log_scale:
+            # avoid non-positive values for log scale
+            lower = np.maximum(lower, 1e-12)
+
+        cmap = plt.get_cmap('viridis')
+        max_s = s.max() if len(s) > 0 else 0.0
+        if max_s == 0:
+            colors = [cmap(0.5)] * max(1, len(s))
+        else:
+            colors = [cmap(val / max_s) for val in s]
+
+        # fill per-segment so color can vary with stdev
+        for i in range(len(x) - 1):
+            xi = [x[i], x[i + 1]]
+            yi_lower = [lower[i], lower[i + 1]]
+            yi_upper = [upper[i], upper[i + 1]]
+            ax.fill_between(xi, yi_lower, yi_upper, color=colors[i], alpha=0.3, linewidth=0)
+        if len(x) == 1:
+            ax.fill_between([x[0] - 0.5, x[0] + 0.5], [lower[0], lower[0]], [upper[0], upper[0]],
+                            color=colors[0], alpha=0.3, linewidth=0)
+
+    # wrap plotting functions so we can inject the shaded area when the error-vs-iteration plot is drawn
+    orig_plot = plt.plot
+    orig_semilogy = plt.semilogy
+
+    y_list_ref = list(y_arr)  # reference to identify the error-history plot when plotting
+
+    def _is_same_array(a, b):
+        try:
+            return np.array(a, dtype=float).shape == np.array(b, dtype=float).shape and \
+                   np.allclose(np.array(a, dtype=float), np.array(b, dtype=float))
+        except Exception:
+            return False
+
+    def wrapped_plot(*args, **kwargs):
+        res = orig_plot(*args, **kwargs)
+        # detect call: plot(y) where y matches our error list -> iteration-error plot
+        if len(args) >= 1 and _is_same_array(args[0], y_list_ref):
+            ax = plt.gca()
+            _draw_shaded(ax, x_idx, y_arr, stdevs, log_scale=False)
+        return res
+
+    def wrapped_semilogy(*args, **kwargs):
+        res = orig_semilogy(*args, **kwargs)
+        # detect call: semilogy(y) where y matches our error list -> iteration-error plot (log scale)
+        if len(args) >= 1 and _is_same_array(args[0], y_list_ref):
+            ax = plt.gca()
+            _draw_shaded(ax, x_idx, y_arr, stdevs, log_scale=True)
+        return res
+
+    plt.plot = wrapped_plot
+    plt.semilogy = wrapped_semilogy
+    error_vs_k_plot_path = os.path.join(analysis_dir, "error_w_std_vs_k.png")
+    os.makedirs(analysis_dir, exist_ok=True)
+    plt.figure()
+    if log_scale:
+        plt.semilogy(list(np.array(learning_history)[:, -3]), marker='o')
+        plt.ylim(top=2)
+    else:
+        plt.plot(list(np.array(learning_history)[:, -3]), marker='o')
+        plt.ylim(-0.1, 1.1)
+    plt.xlabel("Iteration")
+    plt.ylabel("Error (U - L)")
+    plt.title("Learning Error History")
+    plt.grid()
+    plt.savefig(error_vs_k_plot_path)
+    plt.close()
+
+    error_vs_samples_plot_path = os.path.join(analysis_dir, "error_w_std_vs_samples.png")
+    plt.figure()
+    if log_scale:
+        plt.semilogy(list(np.array(learning_history)[:, 1]), list(np.array(learning_history)[:, -3]))
+        plt.ylim(top=2)
+    else:
+        plt.plot(list(np.array(learning_history)[:, 1]), list(np.array(learning_history)[:, -3]))
+        plt.ylim(-0.1, 1.1)
+    plt.xlabel("Number of Samples")
+    plt.ylabel("Error (U - L)")
+    plt.title("Learning Error vs Number of Samples")
+    plt.grid()
+    plt.savefig(error_vs_samples_plot_path)
+    plt.close()
+
 
 if __name__ == '__main__':
     print("Processing analysis data files...")
     raw_results = extract_benchmarks()
     final_results = refine_results(raw_results)
     plot_results(final_results)
+
+    plot_error_stdev_curve(final_results, raw_results)
+    # plot_policy_accuracy_stdev_curve(final_results, raw_results)
+
     
     # if final_results:
     #     save_results(final_results)
