@@ -404,11 +404,9 @@ class LTLReachabilityLearner:
         n = self.num_policy_accuracy_sims
         successful_runs = 0
         for _ in tqdm(range(0, n), desc="Policy accuracy sims", unit="sim"):
-        # for _ in range(0, n):
             # start from the ground-truth initial state
             curr_state = self.mdp_sim.gt_mdp.initial_state
 
-            # for _ in tqdm(range(0, max_steps), desc="Policy accuracy sim steps", unit="step"):
             for _ in range(0, max_steps):
                 if curr_state in self.mdp_sim.gt_mdp.goal_states:
                     successful_runs += 1
@@ -434,7 +432,6 @@ class LTLReachabilityLearner:
                         chosen_action = mec_a
                     else:
                         # choose a random action available in the ground-truth MDP for the current state
-                        # available = list(self.mdp_sim.gt_mdp.topology.get(curr_state, []))
                         available = [a for a in list(self.mdp_sim.gt_mdp.topology.get(curr_state, [])) if (curr_state, a) in mdp.MEC_state_action_pairs[policy_state]]
                         if not available:
                             break
@@ -855,5 +852,4 @@ class LTLReachabilityLearner:
         return (prev_error - curr_error) < threshold
 
     def num_bvi_iterations(self, num_states, k):
-        # TODO: use what they used in their paper? --> len(self.discovered_mdp.states) * (2 ** k))
         return int(num_states * k / 5) + 1

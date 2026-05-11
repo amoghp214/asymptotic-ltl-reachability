@@ -121,7 +121,7 @@ class MDP:
             for a in self.topology[s]:
                 self.add_action_to_state(new_super_state, (s, a))
                 self.transition_probabilities[(new_super_state, (s, a))] = self.transition_probabilities[(s, a)]
-                self.sa_value_bounds[(new_super_state, (s, a))] = self.sa_value_bounds[(s, a)] if (s, a) not in state_action_pairs else [0, 0] # TODO: ask prof - what if it is a self loop? shouldn't the bound then become [0, 0]?
+                self.sa_value_bounds[(new_super_state, (s, a))] = self.sa_value_bounds[(s, a)] if (s, a) not in state_action_pairs else [0, 0]
                 self.sample_counts[(new_super_state, (s, a))] = self.sample_counts[(s, a)]
             self.s_value_bounds[new_super_state] = [0, 1] # TODO: is this correct?
             if (s == self.initial_state):
@@ -261,11 +261,6 @@ class MDP:
                 new_s_value_bounds[0] = self.sa_value_bounds[(state, a)][0]
             if (self.sa_value_bounds[(state, a)][1] > new_s_value_bounds[1]):
                 new_s_value_bounds[1] = self.sa_value_bounds[(state, a)][1]
-                # Update policy based on the updated best action for a given state
-                # self.learned_policy[state] = a  # TODO: update this to account for MEC collapse?
-            # if (self.sa_value_bounds[(state, a)][1] == self.sa_value_bounds[(state, self.learned_policy[state])][1] and
-            #     self.sa_value_bounds[(state, a)][0] > self.sa_value_bounds[(state, self.learned_policy[state])][0]):
-                # self.learned_policy[state] = a  # TODO: update this to account for MEC collapse?
         
         assert new_s_value_bounds != [-1, -1], "new_s_value_bounds was not updated."
 

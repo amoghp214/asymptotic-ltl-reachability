@@ -420,7 +420,7 @@ def _discover_reachable_states(jani_data: Dict, initial_state: Tuple, goal_condi
         discovered_states.add(state)
         state_dict = dict(state)
 
-        # NOTE: idk if this is needed or not since some PRISM MDP need it and others do not
+        # NOTE: We do not know if this is needed or not since some PRISM MDP need it and others do not
         # if (goal_condition is not None and _evaluate_expression(goal_condition, state_dict)):
         #     # Do not expand goal states
         #     continue
