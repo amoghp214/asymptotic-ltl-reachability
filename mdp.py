@@ -312,7 +312,7 @@ class MDP:
     def _calculate_transition_probability_confidence_width(self, state, action, confidence_error, two_sided_hoeffding=False):
         """
         Calculate the margin of error for an estimated transition probability
-        using Chernoff bound (Algorithm 1: ErrorBound).
+        using Hoeffding bound (Algorithm 1: ErrorBound).
 
         Args:
             state: The current state

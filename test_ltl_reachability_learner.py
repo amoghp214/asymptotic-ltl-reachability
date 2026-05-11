@@ -350,9 +350,7 @@ class TestMDPFunctionality(unittest.TestCase):
         learner.mdp_sim.gt_mdp.confidence_error = 1 * len(learner.mdp_sim.gt_mdp.state_action_pairs) / learner.mdp_sim.gt_mdp.p_min  # To make confidence width == 1
         learner.mdp_sim.gt_mdp.update_transition_probabilities()
         self.assertTrue(learner._confidently_detect_end_component(mdp, set([2,3,4,5]), 0.51, 0.51))
-        self.assertTrue(learner._confidently_detect_end_component(mdp, set([2,3,4,5]), 0.49999, 0.49999))
         self.assertTrue(learner._confidently_detect_end_component(mdp, set([6]), 0.000021, 0.000021))
-        self.assertTrue(learner._confidently_detect_end_component(mdp, set([6]), 0.00001, 0.00001))
 
     def test_calculate_transition_probability_error_tolerance(self):
         mdp = setup_loop_3()

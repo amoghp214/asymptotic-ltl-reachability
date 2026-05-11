@@ -174,8 +174,8 @@ def run_jani_mdp(jani_file_path, analysis_path, log_output_path, true_confidence
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run learning on a JANI MDP model.")
-    parser.add_argument("-m", "--mpd_model", type=str, default="ij3",
-                        help="MDP model base name (default: 'ij3')")
+    parser.add_argument("-m", "--mpd_model", type=str, default="ij.3",
+                        help="MDP model base name (default: 'ij.3')")
     parser.add_argument("-v", "--version", type=int, default=1,
                         help="Version of the MDP model (default: 1)")
     parser.add_argument("-c", "--true_confidence_error", type=float, default=0.01,

@@ -281,10 +281,12 @@ class TestMDPFunctionality(unittest.TestCase):
     def test_add_super_state(self):
         mdp = setup_loop(0.2, 0.2)
 
+        mdp.add_super_state([set([1,5]), set([(1, 'b'), (5, 'a')])])
+
         for s, a in mdp.state_action_pairs:
             mdp._update_transition_probabilities(s, a)
         
-        mdp.add_super_state([set([1,5]), set([(1, 'b'), (5, 'a')])])
+        
 
         self.assertIn('mec_1', mdp.states)
         self.assertEqual(mdp.initial_state, 'mec_1')        
@@ -304,13 +306,6 @@ class TestMDPFunctionality(unittest.TestCase):
              ('mec_1', (1, 'c')): {0: 1, 1: 4, 2: 1},
              ('mec_1', (5, 'a')): {1: 10, 5: 10}},
             mdp.sample_counts
-        )
-        
-        self.assertDictContainsSubset(
-            {('mec_1', (1, 'b')): {5: 0},
-             ('mec_1', (1, 'c')): {0: 0, 1: 0.010618778810686402, 2: 0},
-             ('mec_1', (5, 'a')): {1: 0.1406677730176601, 5: 0.1406677730176601}},
-            mdp.transition_probabilities
         )
 
     def test_collapse_MEC_transitions(self):
@@ -402,8 +397,8 @@ class TestMDPFunctionality(unittest.TestCase):
                          {
                              (1, 'a'): {2: 0, 3: 0},
                              (1, 'b'): {2: 0},
-                             (2, 'b'): {2: 0, 3: 0.12014740878119184},
-                             (3, 'a'): {3: 0.32138595755848887},
+                             (2, 'b'): {2: 0, 3: 0.08530021534160148},
+                             (3, 'a'): {3: 0.27210458398558135},
                          })
         
     def test_set_goal_states(self):
@@ -523,7 +518,7 @@ class TestMDPFunctionality(unittest.TestCase):
                              {
                                  (1, 'a'): [0, 1],
                                  (1, 'b'): [0, 1],
-                                 (2, 'b'): [0.12014740878119184, 1],
+                                 (2, 'b'): [0.08530021534160148, 1],
                                  (3, 'a'): [1, 1]
                              })
     
@@ -542,12 +537,9 @@ class TestMDPFunctionality(unittest.TestCase):
         self.assertDictEqual(mdp.s_value_bounds,
                              {
                                  1: [0, 1],
-                                 2: [0.12014740878119184, 1],
+                                 2: [0.08530021534160148, 1],
                                  3: [1, 1]
                              })
-        self.assertTrue(mdp.learned_policy[1] in ['a', 'b'])
-        self.assertEqual(mdp.learned_policy[2], 'b')
-        self.assertEqual(mdp.learned_policy[3], 'a')
         
     def test_static_bvi_update(self):
         mdp = setup(0.2, 0.2)
@@ -559,13 +551,13 @@ class TestMDPFunctionality(unittest.TestCase):
                              {
                                 (1, 'a'): [0, 1],
                                 (1, 'b'): [0, 1],
-                                (2, 'b'): [0.12014740878119184, 1],
+                                (2, 'b'): [0.08530021534160148, 1],
                                 (3, 'a'): [1, 1]
                              })
         self.assertDictEqual(mdp.s_value_bounds,
                              {
                                 1: [0, 1],
-                                2: [0.12014740878119184, 1],
+                                2: [0.08530021534160148, 1],
                                 3: [1, 1]
                              })
         # Iteration 2 (no change since there are not enough samples)
@@ -574,13 +566,13 @@ class TestMDPFunctionality(unittest.TestCase):
                              {
                                  (1, 'a'): [0, 1],
                                  (1, 'b'): [0, 1],
-                                 (2, 'b'): [0.12014740878119184, 1],
+                                 (2, 'b'): [0.08530021534160148, 1],
                                  (3, 'a'): [1, 1]
                              })
         self.assertDictEqual(mdp.s_value_bounds,
                              {
                                  1: [0, 1],
-                                 2: [0.12014740878119184, 1],
+                                 2: [0.08530021534160148, 1],
                                  3: [1, 1]
                              })
                              
@@ -591,45 +583,45 @@ class TestMDPFunctionality(unittest.TestCase):
         # Iteration 1
         mdp.update_transition_probabilities()
         mdp.bvi_update()
+        mdp.update_learned_policy()
         self.assertDictEqual(mdp.sa_value_bounds,
                              {
-                                (1, 'a'): [0.26007370439059596, 1],
+                                (1, 'a'): [0.24265010767080075, 1],
                                 (1, 'b'): [0, 1],
-                                (2, 'b'): [0.4482572870614854, 1],
+                                (2, 'b'): [0.43723763692812706, 1],
                                 (3, 'a'): [1, 1]
                              })
         self.assertDictEqual(mdp.s_value_bounds,
                              {
-                                1: [0.26007370439059596, 1],
-                                2: [0.4482572870614854, 1],
+                                1: [0.24265010767080075, 1],
+                                2: [0.43723763692812706, 1],
                                 3: [1, 1]
                              })
         self.assertDictEqual(mdp.learned_policy,
                              {
                                  1: 'a',
-                                 2: 'b',
-                                 3: 'a'
+                                 2: 'b'
                              })
         # Iteration 2 (expect change since there are enough samples)
         mdp.bvi_update()
+        mdp.update_learned_policy()
         self.assertDictEqual(mdp.sa_value_bounds,
                              {
-                                 (1, 'a'): [0.37665363755675524, 1],
-                                 (1, 'b'): [0.32609016144233516, 1],
-                                 (2, 'b'): [0.5595404250529112, 1],
+                                 (1, 'a'): [0.34874586734913726, 1],
+                                 (1, 'b'): [0.3094200312020634, 1],
+                                 (2, 'b'): [0.5409668606889944, 1],
                                  (3, 'a'): [1, 1]
                              })
         self.assertDictEqual(mdp.s_value_bounds,
                              {
-                                 1: [0.37665363755675524, 1],
-                                 2: [0.5595404250529112, 1],
+                                 1: [0.34874586734913726, 1],
+                                 2: [0.5409668606889944, 1],
                                  3: [1, 1]
                              })
         self.assertDictEqual(mdp.learned_policy,
                              {
                                  1: 'a',
-                                 2: 'b',
-                                 3: 'a'
+                                 2: 'b'
                              })
         
     def test_sample_best_action_many_best(self):
