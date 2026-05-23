@@ -271,7 +271,7 @@ State 2: (goal)
   - Both actions loop back to 2
 ```
 
-Expected reachability from 0 to 2: ≈ 0.42
+Expected reachability from 0 to 2: = 1.0
 
 
 ## Notes
