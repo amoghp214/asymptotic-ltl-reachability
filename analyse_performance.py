@@ -114,6 +114,7 @@ def plot_results(results, output_dir='./analysis/'):
         output_path.mkdir(parents=True, exist_ok=True)
         
         run_analysis(
+            benchmark_name=benchmark_name,
             analysis_dir=str(output_path),
             learning_history=benchmark_results['learning_history'],
             states_set_history=benchmark_results['states_set_history'],

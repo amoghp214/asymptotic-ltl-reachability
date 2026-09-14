@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import json
 import os
 
+with open("optimal_policy_reachability.json", "r") as f:
+    OPTIMAL_POLICY_REACHABILITY = json.load(f)
 
 def plot_error_history(analysis_dir, learning_history, log_scale=False):
     # plots the learning error history for each iteration and saves it to error_history_plot_path
@@ -103,7 +105,7 @@ def plot_transitions_seen_history(analysis_dir, transitions_seen_history, max_tr
     plt.savefig(num_transitions_seen_vs_samples_plot_path)
     plt.close()
 
-def plot_policy_accuracy_history(analysis_dir, policy_accuracy_history, log_scale=False):
+def plot_policy_accuracy_history(analysis_dir, policy_accuracy_history, benchmark_name="", log_scale=False):
     # plots the policy accuracy history for each iteration and saves it in analysis_dir
     policy_accuracy_vs_k_plot_path = os.path.join(analysis_dir, "policy_accuracy_vs_k.png")
     os.makedirs(analysis_dir, exist_ok=True)
@@ -116,8 +118,14 @@ def plot_policy_accuracy_history(analysis_dir, policy_accuracy_history, log_scal
         plt.plot(list(np.array(policy_accuracy_history)[:, 0]), list(np.array(policy_accuracy_history)[:, -1]), marker='o')
         plt.xlabel("Iteration")
         plt.ylim(-0.1, 1.1)
-    plt.ylabel("Policy Accuracy")
-    plt.title("Policy Accuracy History")
+
+    if benchmark_name in OPTIMAL_POLICY_REACHABILITY:
+        optimal_reachability = OPTIMAL_POLICY_REACHABILITY[benchmark_name]
+        plt.axhline(y=optimal_reachability, color='k', linestyle='--', label=f'Optimal Reachability: {optimal_reachability:.2f}')
+        plt.legend()
+
+    plt.ylabel("Policy Accuracy (Reachability)")
+    plt.title("Policy Accuracy (Reachability) History")
     plt.grid()
     plt.savefig(policy_accuracy_vs_k_plot_path)
     plt.close()
@@ -132,8 +140,14 @@ def plot_policy_accuracy_history(analysis_dir, policy_accuracy_history, log_scal
         plt.plot(list(np.array(policy_accuracy_history)[:, 1]), list(np.array(policy_accuracy_history)[:, -1]))
         plt.xlabel("Number of Samples")
         plt.ylim(-0.1, 1.1)
-    plt.ylabel("Policy Accuracy")
-    plt.title("Policy Accuracy vs Number of Samples")
+    
+    if benchmark_name in OPTIMAL_POLICY_REACHABILITY:
+        optimal_reachability = OPTIMAL_POLICY_REACHABILITY[benchmark_name]
+        plt.axhline(y=optimal_reachability, color='k', linestyle='--', label=f'Optimal Reachability: {optimal_reachability:.2f}')
+        plt.legend()
+
+    plt.ylabel("Policy Accuracy (Reachability)")
+    plt.title("Policy Accuracy (Reachability) vs Number of Samples")
     plt.grid()
     plt.savefig(policy_accuracy_vs_samples_plot_path)
     plt.close()
@@ -156,7 +170,7 @@ def plot_bvi_history(analysis_dir, bvi_history, log_scale=False):
     plt.savefig(error_history_plot_path)
     plt.close()
 
-def plot_value_bounds(analysis_dir, learning_history):
+def plot_value_bounds(analysis_dir, learning_history, benchmark_name=""):
     """Plot lower and upper bounds vs iteration k and vs number of samples."""
     bounds_vs_k_plot_path = os.path.join(analysis_dir, "value_bounds_vs_k.png")
     os.makedirs(analysis_dir, exist_ok=True)
@@ -174,6 +188,10 @@ def plot_value_bounds(analysis_dir, learning_history):
     plt.ylabel("Value")
     plt.ylim(-0.1, 1.1)
     plt.title("Value Bounds for Initial State vs Iteration")
+    if benchmark_name in OPTIMAL_POLICY_REACHABILITY:
+        optimal_reachability = OPTIMAL_POLICY_REACHABILITY[benchmark_name]
+        plt.axhline(y=optimal_reachability, color='k', linestyle=':', linewidth=2, label=r'$V^*$')
+
     plt.legend()
     plt.grid()
     plt.savefig(bounds_vs_k_plot_path)
@@ -195,6 +213,10 @@ def plot_value_bounds(analysis_dir, learning_history):
     plt.ylabel("Value")
     plt.ylim(-0.1, 1.1)
     plt.title("Value Bounds for Initial State vs Number of Samples")
+    if benchmark_name in OPTIMAL_POLICY_REACHABILITY:
+        optimal_reachability = OPTIMAL_POLICY_REACHABILITY[benchmark_name]
+        plt.axhline(y=optimal_reachability, color='k', linestyle=':', linewidth=2, label=r'$V^*$')
+
     plt.legend()
     plt.grid()
     plt.savefig(bounds_vs_samples_plot_path)
@@ -211,20 +233,31 @@ def run_analysis(
     max_transitions: int,
     true_confidence_error: float,
     true_p_min: float,
+    benchmark_name: str = "Benchmark",
 ):
     """
     Run analysis and generate plots for the learning process.
 
     Args:
+        benchmark_name (str): Name of the benchmark, used for labeling plots and reporting in analysis data.
         analysis_dir (str): Directory to save analysis plots and data.
+        learning_history (list): List of tuples (k, num_samples, error, L(s0), U(s0)) for each iteration.
+        states_set_history (list): List of tuples (k, num_samples, num_seen_states) for each iteration.
+        transitions_seen_history (list): List of tuples (k, num_samples, num_seen_transitions) for each iteration.
+        policy_accuracy_history (list): List of tuples (k, num_samples, policy_accuracy) for each iteration.
+        true_error_history (list): List of tuples (k, num_samples, true_error) for each iteration.
+        max_states (int): Maximum number of states in the MDP, used for setting y-axis limits in plots.
+        max_transitions (int): Maximum number of transitions in the MDP, used for setting y-axis limits in plots.
+        true_confidence_error (float): The true confidence error of the final policy, used for reporting in analysis data.
+        true_p_min (float): The true p_min of the MDP, used for reporting in analysis data.
     """
     if not os.path.exists(analysis_dir):
         os.makedirs(analysis_dir)
-    plot_error_history(analysis_dir=analysis_dir, learning_history=learning_history, log_scale=True)
+    plot_error_history(analysis_dir=analysis_dir, learning_history=learning_history, log_scale=False)
     plot_states_set_history(analysis_dir=analysis_dir, states_set_history=states_set_history, max_states=max_states, log_scale=False)
     plot_transitions_seen_history(analysis_dir=analysis_dir, transitions_seen_history=transitions_seen_history, max_transitions=max_transitions, log_scale=False)
-    plot_policy_accuracy_history(analysis_dir=analysis_dir, policy_accuracy_history=policy_accuracy_history, log_scale=False)
-    plot_value_bounds(analysis_dir=analysis_dir, learning_history=learning_history)
+    plot_policy_accuracy_history(analysis_dir=analysis_dir, policy_accuracy_history=policy_accuracy_history, benchmark_name=benchmark_name, log_scale=False)
+    plot_value_bounds(analysis_dir=analysis_dir, learning_history=learning_history, benchmark_name=benchmark_name)
     
     # Save all histories to json file
     analysis_data = {
