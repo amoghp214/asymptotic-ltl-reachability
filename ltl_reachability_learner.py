@@ -487,7 +487,7 @@ class LTLReachabilityLearner:
                 self.add_gt_state_and_actions_to_mdp(self.discovered_mdp, curr_state, is_goal=(curr_state in self.mdp_sim.gt_mdp.goal_states))
             curr_action = self.discovered_mdp.sample_best_action_from_state(curr_state)
             self.discovered_mdp.add_action_to_state(curr_state, curr_action) # NOTE: should have already been added
-            curr_next_state, reward = self.mdp_sim.step(curr_state, curr_action)            
+            curr_next_state, reward = self.mdp_sim.step(curr_state, curr_action)
             
             # NOTE: we assume we have an oracle that will tell us all the valid actions from a state
             if (curr_next_state not in self.discovered_mdp.states):
