@@ -7,8 +7,42 @@ import numpy as np
 from mdp import MDP
 from mdp_simulator import MDPSimulator
 from ltl_reachability_learner import LTLReachabilityLearner
+from model_free_tdql_learner import ModelFreeTDQLearner
 from convert_jani_to_mdp import convert_jani_to_mdp
+from variants import resolve_learner, variant_names, variant_help
 import argparse
+from enum import Enum
+
+
+class Variant(Enum):
+    """
+    The learner variants accepted by --variant.
+
+    The registry in variants/__init__.py decides what each name actually runs;
+    this enum decides what the command line accepts. The check below keeps the
+    two from drifting apart -- if you add a variant there, add it here too.
+    """
+
+    CURRENT = "current"
+    ORIGINAL = "original"
+    OPTIMIZED = "optimized"
+    CUMULATIVE = "cumulative"
+    WINDOWED = "windowed"
+    WINDOWED_SWEEP_SATURATED = "windowed-sweep-saturated"
+    MODEL_BASED = "model-based"
+
+    def __str__(self):
+        # argparse renders choices and defaults with str(), so this is what the
+        # user sees in --help and types on the command line.
+        return self.value
+
+
+_disagreement = {v.value for v in Variant} ^ set(variant_names())
+if _disagreement:
+    raise RuntimeError(
+        "main.py's Variant enum and the variants/ registry disagree about: "
+        + ", ".join(sorted(_disagreement))
+    )
 
 def sim_mdp_setup_1():
     mdp_sim = MDPSimulator()
@@ -144,7 +178,7 @@ def ij10_jani_mdp():
 
 
 
-def run_jani_mdp(jani_file_path, analysis_path, log_output_path, true_confidence_error, true_p_min, min_num_iterations, max_num_iterations, convergence_threshold, num_policy_accuracy_sims):
+def run_jani_mdp(jani_file_path, analysis_path, log_output_path, true_confidence_error, true_p_min, min_num_iterations, max_num_iterations, convergence_threshold, num_policy_accuracy_sims, learner_cls=ModelFreeTDQLearner):
     """
     Example 1: Simple 3-state MDP from JANI file
     States: 0, 1, 2 (2 is goal)
@@ -157,7 +191,17 @@ def run_jani_mdp(jani_file_path, analysis_path, log_output_path, true_confidence
     mdp_sim = MDPSimulator(mdp=convert_jani_to_mdp(jani_file_path))
 
     # Create learner
-    learner = LTLReachabilityLearner(
+    # learner = LTLReachabilityLearner(
+    #     mdp_simulator=mdp_sim, 
+    #     min_num_iterations=min_num_iterations, 
+    #     max_num_iterations=max_num_iterations, 
+    #     convergence_threshold=convergence_threshold,
+    #     num_policy_accuracy_sims=num_policy_accuracy_sims,
+    #     true_confidence_error=true_confidence_error,
+    #     true_p_min=true_p_min
+    # )
+    print("Learner:", learner_cls.__module__ + "." + learner_cls.__name__)
+    learner = learner_cls(
         mdp_simulator=mdp_sim, 
         min_num_iterations=min_num_iterations, 
         max_num_iterations=max_num_iterations, 
@@ -192,15 +236,24 @@ if __name__ == "__main__":
                         help="Number of policy accuracy simulations (default: 1000)")
     parser.add_argument("-i", "--iteration", type=int, default=0,
                         help="Iteration number (default: 0)")
+    parser.add_argument("-V", "--variant", type=Variant, default=Variant.OPTIMIZED,
+                        choices=list(Variant),
+                        help="Which learner variant to run (default: 'current'). " + variant_help())
 
     args = parser.parse_args()
 
     # Set random seed for reproducibility
     # np.random.seed(42)
 
+    learner_cls = resolve_learner(args.variant.value)
+
+    # Non-default variants write to their own paths so their output does not
+    # overwrite a run of the default learner on the same model and iteration.
+    tag = "" if args.variant is Variant.CURRENT else f"_{args.variant.value.replace('-', '_')}"
+
     jani_file_path = f"./mdp_models/{args.mpd_model}.v{args.version}.jani"
-    analysis_path = f"./results/{args.mpd_model.replace('.', '_')}_analysis_{args.iteration}"
-    log_output_path = f"./logs/{args.mpd_model.replace('.', '_')}_learning_log_{args.iteration}.json"
+    analysis_path = f"./results/{args.mpd_model.replace('.', '_')}_analysis_{args.iteration}{tag}"
+    log_output_path = f"./logs/{args.mpd_model.replace('.', '_')}_learning_log_{args.iteration}{tag}.json"
 
     run_jani_mdp(jani_file_path=jani_file_path,
                  analysis_path=analysis_path,
@@ -210,7 +263,8 @@ if __name__ == "__main__":
                  min_num_iterations=args.min_num_iterations,
                  max_num_iterations=args.max_num_iterations,
                  convergence_threshold=args.convergence_threshold,
-                 num_policy_accuracy_sims=args.num_policy_accuracy_sims)
+                 num_policy_accuracy_sims=args.num_policy_accuracy_sims,
+                 learner_cls=learner_cls)
 
     
     print("\n" + "="*60)
