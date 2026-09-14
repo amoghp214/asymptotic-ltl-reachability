@@ -1,0 +1,11 @@
+{
+    "consensus_2": 1.0,
+    "csma_2-2": 0.5,
+    "firewire_abst": 1.0,
+    "ij_3": 1.0,
+    "ij_10": 1.0,
+    "pacman": 0.55,
+    "philosophers-mdp_3": 1.0,
+    "rabin_3": 1.0,
+    "zeroconf": 0
+}
