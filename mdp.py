@@ -1,4 +1,5 @@
 import numpy as np
+import random
 from collections import defaultdict, Counter
 
 class MDP:
@@ -363,6 +364,12 @@ class MDP:
 
         chosen_action = np.random.choice(best_actions)
         return chosen_action
+    
+    def sample_random_action_from_state(self, state):
+        assert state in self.states, f"State {state} is not in the given MDP."
+        assert len(self.topology[state]) > 0, f"State {state} has no actions."
+        chosen_action = random.choice(list(self.topology[state]))
+        return chosen_action
 
     def record_sample(self, state, action, next_state):
         """Record an observed sample/transition."""
@@ -377,6 +384,10 @@ class MDP:
         """
         for state in goal_states:
             self.add_state(state, is_goal=True)
+    
+    def is_goal_state(self, state):
+        """Check if a state is a goal state."""
+        return state in self.goal_states
     
     def set_initial_state(self, state):
         """Set the initial/start state."""
