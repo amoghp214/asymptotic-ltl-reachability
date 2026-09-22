@@ -1,12 +1,13 @@
 import json
 import os
+import argparse
 from pathlib import Path
 from statistics import median
 from collections import defaultdict
 from matplotlib import pyplot as plt
 import numpy as np
 
-from analysis_utils import run_analysis
+from analysis_utils import run_analysis, OPTIMAL_POLICY_REACHABILITY
 
 def load_analysis_data(file_path):
     """Load analysis data from JSON file."""
@@ -39,6 +40,9 @@ def get_benchmark_medians(benchmark_data):
     policy_accuracy_histories = []
     true_error_histories = []
     
+    if not benchmark_data:
+        return None
+
     for trial_data in benchmark_data.values():
         learning_histories.append(trial_data['learning_history'])
         states_set_histories.append(trial_data['states_set_history'])
@@ -48,10 +52,13 @@ def get_benchmark_medians(benchmark_data):
     
     benchmark_metrics = {}
 
-    benchmark_metrics['true_confidence_error'] = benchmark_data['1']['true_confidence_error']
-    benchmark_metrics['true_p_min'] = benchmark_data['1']['true_p_min']
-    benchmark_metrics['max_states'] = benchmark_data['1']['max_states']
-    benchmark_metrics['max_transitions'] = benchmark_data['1']['max_transitions']
+    # These are constant across trials, so read them from any surviving trial
+    # rather than assuming trial '1' was loaded.
+    reference_trial = next(iter(benchmark_data.values()))
+    benchmark_metrics['true_confidence_error'] = reference_trial['true_confidence_error']
+    benchmark_metrics['true_p_min'] = reference_trial['true_p_min']
+    benchmark_metrics['max_states'] = reference_trial['max_states']
+    benchmark_metrics['max_transitions'] = reference_trial['max_transitions']
     benchmark_metrics['learning_history'] = get_median_list(learning_histories)
     benchmark_metrics['states_set_history'] = get_median_list(states_set_histories)
     benchmark_metrics['transitions_seen_history'] = get_median_list(transitions_seen_histories)
@@ -67,11 +74,15 @@ def refine_results(data):
     final_results = {}
 
     for benchmark_name, benchmark_data in data.items():
-        final_results[benchmark_name] = get_benchmark_medians(benchmark_data)
+        medians = get_benchmark_medians(benchmark_data)
+        if medians is None:
+            print(f"Skipping {benchmark_name}: no readable trials.")
+            continue
+        final_results[benchmark_name] = medians
 
     return final_results
 
-def extract_benchmarks(base_dir='./results'):
+def extract_benchmarks(base_dir='./results', variant=""):
     """Process all benchmark analysis files."""
     results = dict() # {benchmark_name: {trial_number: {metrics_dict}}}
     
@@ -88,22 +99,31 @@ def extract_benchmarks(base_dir='./results'):
         name = benchmark_dir.name
         parts = name.split('_')
         assert len(parts) >= 3, f"Unexpected benchmark directory name format: {name}"
-        benchmark_name = '_'.join(parts[:-2])
-        trial_number = parts[-1]
+        benchmark_name = '_'.join(parts[:-3])
+        trial_number = parts[-2]
+        variant_type = parts[-1]
+        if variant and variant_type != variant:
+            continue
 
         if benchmark_name not in results.keys():
             results[benchmark_name] = dict()
-        if trial_number not in results[benchmark_name].keys():
-            results[benchmark_name][trial_number] = dict()
-            
+
         analysis_file = benchmark_dir / 'analysis_data.json'
-        assert analysis_file.exists(), f"Analysis file not found: {analysis_file}"
-        
+
+        # Only record a trial once its data is successfully read. Missing or
+        # unreadable files are skipped rather than fatal: on Lustre an offline
+        # OST makes stat/read fail with ENOTCONN/EIO, and one bad trial should
+        # not discard the rest of the run.
         try:
             data = load_analysis_data(analysis_file)
-            results[benchmark_name][trial_number] = data
+        except OSError as e:
+            print(f"Skipping unreadable {analysis_file}: {e}")
+            continue
         except Exception as e:
             print(f"Error processing {analysis_file}: {e}")
+            continue
+
+        results[benchmark_name][trial_number] = data
     
     return results
 
@@ -143,149 +163,205 @@ def save_results(results, base_output_dir='./analysis/'):
         
         print(f"{benchmark_name} results saved to {output_file}")
     
-def plot_error_stdev_curve(final_results, raw_results, output_dir='./analysis/'):
-    for benchmark_name in final_results.keys():
-        os.makedirs(os.path.join(output_dir, benchmark_name), exist_ok=True)
-        output_path = Path(output_dir) / benchmark_name
-        output_path.mkdir(parents=True, exist_ok=True)
-        analysis_dir = str(output_path)
-        learning_history = final_results[benchmark_name]['learning_history']
-        # calculate stdev of error at each iteration across trials for a benchmark
-        error_stdev_history = []
-        num_trials = len(raw_results[benchmark_name])
-        max_iterations_done = len(learning_history)
-        for i in range(max_iterations_done):
-            errors_at_i = []
-            for trial_data in raw_results[benchmark_name].values():
-                if len(trial_data['learning_history']) > i:
-                    errors_at_i.append(trial_data['learning_history'][i][-3])
-            if errors_at_i:
-                stdev_i = np.std(errors_at_i)
-                error_stdev_history.append((i + 1, stdev_i))
-            else:
-                error_stdev_history.append((i + 1, 0.0))
-        plot_error_history_w_stdev(analysis_dir, learning_history, error_stdev_history, log_scale=False)
+def compute_stdev_history(raw_results, benchmark_name, history_key, value_index, num_points):
+    """
+    Standard deviation of one metric across trials, at each iteration.
+
+    Args:
+        raw_results (dict): {benchmark: {trial: analysis_data}} from extract_benchmarks.
+        benchmark_name (str): Benchmark to compute for.
+        history_key (str): Which history to read out of each trial's data.
+        value_index (int): Column of that history holding the metric.
+        num_points (int): Number of iterations in the median history.
+
+    Returns:
+        list: (k, stdev) per iteration, k being 1-based to match the histories.
+    """
+    stdev_history = []
+    for i in range(num_points):
+        values_at_i = []
+        for trial_data in raw_results.get(benchmark_name, {}).values():
+            history = trial_data.get(history_key, [])
+            if len(history) > i:
+                values_at_i.append(history[i][value_index])
+        stdev_history.append((i + 1, float(np.std(values_at_i)) if values_at_i else 0.0))
+    return stdev_history
 
 
-def plot_error_history_w_stdev(analysis_dir, learning_history, error_stdev_history, log_scale=False):
-    # plots the learning error history for each iteration and saves it to error_history_plot_path
-    # Prepare arrays for plotting and create wrappers that inject the stdev shaded area
-    arr = np.array(learning_history)
+def save_stdev_data(analysis_dir, key, stdev_history):
+    """
+    Record one stdev history in analysis_dir/stdev_data.json.
+
+    compare_performance.py reads this file to draw the same bands when it
+    combines variants: the medians in analysis_data.json cannot reproduce them.
+    """
+    stdev_data_path = os.path.join(analysis_dir, 'stdev_data.json')
+    stdev_data = {}
+    if os.path.exists(stdev_data_path):
+        try:
+            with open(stdev_data_path, 'r') as f:
+                stdev_data = json.load(f)
+        except Exception as e:
+            print(f"Warning: could not read {stdev_data_path} ({e}), rewriting it.")
+            stdev_data = {}
+
+    stdev_data[key] = [list(point) for point in stdev_history]
+    with open(stdev_data_path, 'w') as f:
+        json.dump(stdev_data, f, indent=2)
+
+
+def draw_stdev_band(ax, x, y, stdevs, log_scale=False):
+    """Shade y +/- stdev, colouring each segment by how large the stdev is."""
+    upper = y + stdevs
+    lower = y - stdevs
+    if log_scale:
+        # avoid non-positive values for log scale
+        lower = np.maximum(lower, 1e-12)
+
+    cmap = plt.get_cmap('viridis')
+    max_s = stdevs.max() if len(stdevs) > 0 else 0.0
+    if max_s == 0:
+        colors = [cmap(0.5)] * max(1, len(stdevs))
+    else:
+        colors = [cmap(val / max_s) for val in stdevs]
+
+    # fill per-segment so colour can vary with stdev
+    for i in range(len(x) - 1):
+        ax.fill_between([x[i], x[i + 1]], [lower[i], lower[i + 1]], [upper[i], upper[i + 1]],
+                        color=colors[i], alpha=0.3, linewidth=0)
+    if len(x) == 1:
+        ax.fill_between([x[0] - 0.5, x[0] + 0.5], [lower[0], lower[0]], [upper[0], upper[0]],
+                        color=colors[0], alpha=0.3, linewidth=0)
+
+
+def plot_history_w_stdev(analysis_dir, history, stdev_history, value_index,
+                         vs_k_filename, vs_samples_filename, ylabel,
+                         vs_k_title, vs_samples_title, ylim=(-0.1, 1.1),
+                         optimal_reachability=None, log_scale=False):
+    """
+    Plot one metric against k and against sample count, with the stdev shaded.
+
+    Args:
+        analysis_dir (str): Directory to save the plots in.
+        history (list): Median history rows; column 0 is k and column 1 is samples.
+        stdev_history (list): (k, stdev) pairs from compute_stdev_history.
+        value_index (int): Column of `history` holding the metric.
+        vs_k_filename, vs_samples_filename (str): Output file names.
+        ylabel, vs_k_title, vs_samples_title (str): Axis label and titles.
+        ylim (tuple): (bottom, top) for the y axis.
+        optimal_reachability (float or None): If given, draw the V* line.
+        log_scale (bool): Use a log y axis.
+    """
+    arr = np.array(history, dtype=float)
     if arr.size == 0:
         return
 
-    y_arr = arr[:, -3].astype(float)
-    x_idx = np.arange(len(y_arr))
-
-    # Align stdevs to the learning_history indices. error_stdev_history is [(k, stdev), ...]
-    if error_stdev_history:
-        ks = [int(t[0]) for t in error_stdev_history]
-        min_k = min(ks)
-        stdev_map = {int(k): float(s) for k, s in error_stdev_history}
-        stdevs = np.array([stdev_map.get(i + min_k, 0.0) for i in range(len(y_arr))], dtype=float)
-    else:
-        stdevs = np.zeros_like(y_arr)
-
-    # function to draw translucent, per-segment colored fill between (y - stdev) and (y + stdev)
-    def _draw_shaded(ax, x, y, s, log_scale):
-        upper = y + s
-        lower = y - s
-        if log_scale:
-            # avoid non-positive values for log scale
-            lower = np.maximum(lower, 1e-12)
-
-        cmap = plt.get_cmap('viridis')
-        max_s = s.max() if len(s) > 0 else 0.0
-        if max_s == 0:
-            colors = [cmap(0.5)] * max(1, len(s))
-        else:
-            colors = [cmap(val / max_s) for val in s]
-
-        # fill per-segment so color can vary with stdev
-        for i in range(len(x) - 1):
-            xi = [x[i], x[i + 1]]
-            yi_lower = [lower[i], lower[i + 1]]
-            yi_upper = [upper[i], upper[i + 1]]
-            ax.fill_between(xi, yi_lower, yi_upper, color=colors[i], alpha=0.3, linewidth=0)
-        if len(x) == 1:
-            ax.fill_between([x[0] - 0.5, x[0] + 0.5], [lower[0], lower[0]], [upper[0], upper[0]],
-                            color=colors[0], alpha=0.3, linewidth=0)
-
-    # wrap plotting functions so we can inject the shaded area when the error-vs-iteration plot is drawn
-    orig_plot = plt.plot
-    orig_semilogy = plt.semilogy
-
-    y_list_ref = list(y_arr)  # reference to identify the error-history plot when plotting
-
-    def _is_same_array(a, b):
-        try:
-            return np.array(a, dtype=float).shape == np.array(b, dtype=float).shape and \
-                   np.allclose(np.array(a, dtype=float), np.array(b, dtype=float))
-        except Exception:
-            return False
-
-    def wrapped_plot(*args, **kwargs):
-        res = orig_plot(*args, **kwargs)
-        # detect call: plot(y) where y matches our error list -> iteration-error plot
-        if len(args) >= 1 and _is_same_array(args[0], y_list_ref):
-            ax = plt.gca()
-            _draw_shaded(ax, x_idx, y_arr, stdevs, log_scale=False)
-        return res
-
-    def wrapped_semilogy(*args, **kwargs):
-        res = orig_semilogy(*args, **kwargs)
-        # detect call: semilogy(y) where y matches our error list -> iteration-error plot (log scale)
-        if len(args) >= 1 and _is_same_array(args[0], y_list_ref):
-            ax = plt.gca()
-            _draw_shaded(ax, x_idx, y_arr, stdevs, log_scale=True)
-        return res
-
-    plt.plot = wrapped_plot
-    plt.semilogy = wrapped_semilogy
-    error_vs_k_plot_path = os.path.join(analysis_dir, "error_w_std_vs_k.png")
     os.makedirs(analysis_dir, exist_ok=True)
-    plt.figure()
-    if log_scale:
-        plt.semilogy(list(np.array(learning_history)[:, -3]), marker='o')
-        plt.ylim(top=2)
-    else:
-        plt.plot(list(np.array(learning_history)[:, -3]), marker='o')
-        plt.ylim(-0.1, 1.1)
-    plt.xlabel("Iteration")
-    plt.ylabel("Error (U - L)")
-    plt.title("Learning Error History")
-    plt.grid()
-    plt.savefig(error_vs_k_plot_path)
-    plt.close()
+    y_values = arr[:, value_index]
 
-    error_vs_samples_plot_path = os.path.join(analysis_dir, "error_w_std_vs_samples.png")
-    plt.figure()
-    if log_scale:
-        plt.semilogy(list(np.array(learning_history)[:, 1]), list(np.array(learning_history)[:, -3]))
-        plt.ylim(top=2)
-    else:
-        plt.plot(list(np.array(learning_history)[:, 1]), list(np.array(learning_history)[:, -3]))
-        plt.ylim(-0.1, 1.1)
-    plt.xlabel("Number of Samples")
-    plt.ylabel("Error (U - L)")
-    plt.title("Learning Error vs Number of Samples")
-    plt.grid()
-    plt.savefig(error_vs_samples_plot_path)
-    plt.close()
+    # Align stdevs to the median history by k, which both share.
+    stdev_map = {int(k): float(s) for k, s in stdev_history}
+    stdevs = np.array([stdev_map.get(int(k), 0.0) for k in arr[:, 0]], dtype=float)
 
+    for filename, x_values, xlabel, title in (
+        (vs_k_filename, arr[:, 0], "Iteration", vs_k_title),
+        (vs_samples_filename, arr[:, 1], "Number of Samples", vs_samples_title),
+    ):
+        plt.figure()
+        if log_scale:
+            plt.semilogy(x_values, y_values, marker='o')
+            plt.ylim(top=ylim[1])
+        else:
+            plt.plot(x_values, y_values, marker='o')
+            plt.ylim(*ylim)
+
+        draw_stdev_band(plt.gca(), x_values, y_values, stdevs, log_scale=log_scale)
+
+        if optimal_reachability is not None:
+            plt.axhline(y=optimal_reachability, color='red', linestyle='--', linewidth=2,
+                        alpha=0.8, zorder=10,
+                        label=f'Optimal Reachability = {optimal_reachability:.2f}')
+            plt.legend()
+
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        plt.title(title)
+        plt.grid()
+        plt.savefig(os.path.join(analysis_dir, filename))
+        plt.close()
+
+
+def plot_error_stdev_curve(final_results, raw_results, output_dir='./analysis/'):
+    """Error vs k and vs samples, with the across-trial stdev shaded."""
+    for benchmark_name in final_results.keys():
+        output_path = Path(output_dir) / benchmark_name
+        output_path.mkdir(parents=True, exist_ok=True)
+        analysis_dir = str(output_path)
+
+        learning_history = final_results[benchmark_name]['learning_history']
+        # calculate stdev of error at each iteration across trials for a benchmark
+        error_stdev_history = compute_stdev_history(
+            raw_results, benchmark_name, 'learning_history', -3, len(learning_history))
+        save_stdev_data(analysis_dir, 'error_stdev_history', error_stdev_history)
+
+        plot_history_w_stdev(
+            analysis_dir=analysis_dir,
+            history=learning_history,
+            stdev_history=error_stdev_history,
+            value_index=-3,
+            vs_k_filename="error_w_std_vs_k.png",
+            vs_samples_filename="error_w_std_vs_samples.png",
+            ylabel="Error (U - L)",
+            vs_k_title="Learning Error History",
+            vs_samples_title="Learning Error vs Number of Samples",
+        )
+
+
+def plot_policy_accuracy_stdev_curve(final_results, raw_results, output_dir='./analysis/'):
+    """Policy accuracy vs k and vs samples, with the across-trial stdev shaded."""
+    for benchmark_name in final_results.keys():
+        output_path = Path(output_dir) / benchmark_name
+        output_path.mkdir(parents=True, exist_ok=True)
+        analysis_dir = str(output_path)
+
+        policy_accuracy_history = final_results[benchmark_name]['policy_accuracy_history']
+        # calculate stdev of policy accuracy at each iteration across trials
+        policy_accuracy_stdev_history = compute_stdev_history(
+            raw_results, benchmark_name, 'policy_accuracy_history', -1, len(policy_accuracy_history))
+        save_stdev_data(analysis_dir, 'policy_accuracy_stdev_history', policy_accuracy_stdev_history)
+
+        plot_history_w_stdev(
+            analysis_dir=analysis_dir,
+            history=policy_accuracy_history,
+            stdev_history=policy_accuracy_stdev_history,
+            value_index=-1,
+            vs_k_filename="policy_accuracy_w_std_vs_k.png",
+            vs_samples_filename="policy_accuracy_w_std_vs_samples.png",
+            ylabel="Policy Accuracy (Reachability)",
+            vs_k_title="Policy Accuracy (Reachability) History",
+            vs_samples_title="Policy Accuracy (Reachability) vs Number of Samples",
+            optimal_reachability=OPTIMAL_POLICY_REACHABILITY.get(benchmark_name),
+        )
 
 if __name__ == '__main__':
-    print("Processing analysis data files...")
-    raw_results = extract_benchmarks()
-    final_results = refine_results(raw_results)
-    plot_results(final_results)
+    parser = argparse.ArgumentParser(description="Aggregate and plot benchmark analysis results.")
+    parser.add_argument("-V", "--variant", type=str, default="",
+                        help="Learner variant whose results to analyse (default: '').")
+    args = parser.parse_args()
 
-    plot_error_stdev_curve(final_results, raw_results)
-    # plot_policy_accuracy_stdev_curve(final_results, raw_results)
+    output_dir = os.path.join('./analysis', args.variant)
+
+    print("Processing analysis data files...")
+    raw_results = extract_benchmarks(variant=args.variant)
+    final_results = refine_results(raw_results)
+    plot_results(final_results, output_dir=output_dir)
+
+    plot_error_stdev_curve(final_results, raw_results, output_dir=output_dir)
+    plot_policy_accuracy_stdev_curve(final_results, raw_results, output_dir=output_dir)
 
     
     # if final_results:
-    #     save_results(final_results)
+    #     save_results(final_results, base_output_dir=output_dir)
     #     print(f"Processed and saved refined results for {len(final_results.keys())} benchmark(s).")
     # else:
     #     print("No analysis data files found.")

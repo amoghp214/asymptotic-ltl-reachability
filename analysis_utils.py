@@ -120,8 +120,9 @@ def plot_policy_accuracy_history(analysis_dir, policy_accuracy_history, benchmar
         plt.ylim(-0.1, 1.1)
 
     if benchmark_name in OPTIMAL_POLICY_REACHABILITY:
+        print(f"Benchmark {benchmark_name} has optimal reachability: {OPTIMAL_POLICY_REACHABILITY[benchmark_name]}")
         optimal_reachability = OPTIMAL_POLICY_REACHABILITY[benchmark_name]
-        plt.axhline(y=optimal_reachability, color='k', linestyle='--', label=f'Optimal Reachability: {optimal_reachability:.2f}')
+        plt.axhline(y=optimal_reachability, color='red', linestyle='--', linewidth=2, alpha=0.8, zorder=10, label=f'Optimal Reachability = {optimal_reachability:.2f}')
         plt.legend()
 
     plt.ylabel("Policy Accuracy (Reachability)")
@@ -143,7 +144,7 @@ def plot_policy_accuracy_history(analysis_dir, policy_accuracy_history, benchmar
     
     if benchmark_name in OPTIMAL_POLICY_REACHABILITY:
         optimal_reachability = OPTIMAL_POLICY_REACHABILITY[benchmark_name]
-        plt.axhline(y=optimal_reachability, color='k', linestyle='--', label=f'Optimal Reachability: {optimal_reachability:.2f}')
+        plt.axhline(y=optimal_reachability, color='red', linestyle='--', linewidth=2, alpha=0.8, zorder=10, label=f'Optimal Reachability = {optimal_reachability:.2f}')
         plt.legend()
 
     plt.ylabel("Policy Accuracy (Reachability)")
@@ -190,7 +191,7 @@ def plot_value_bounds(analysis_dir, learning_history, benchmark_name=""):
     plt.title("Value Bounds for Initial State vs Iteration")
     if benchmark_name in OPTIMAL_POLICY_REACHABILITY:
         optimal_reachability = OPTIMAL_POLICY_REACHABILITY[benchmark_name]
-        plt.axhline(y=optimal_reachability, color='k', linestyle=':', linewidth=2, label=r'$V^*$')
+        plt.axhline(y=optimal_reachability, color='red', linestyle='--', linewidth=2, alpha=0.8, zorder=10, label=f'Optimal Reachability = {optimal_reachability:.2f}')
 
     plt.legend()
     plt.grid()
@@ -215,7 +216,7 @@ def plot_value_bounds(analysis_dir, learning_history, benchmark_name=""):
     plt.title("Value Bounds for Initial State vs Number of Samples")
     if benchmark_name in OPTIMAL_POLICY_REACHABILITY:
         optimal_reachability = OPTIMAL_POLICY_REACHABILITY[benchmark_name]
-        plt.axhline(y=optimal_reachability, color='k', linestyle=':', linewidth=2, label=r'$V^*$')
+        plt.axhline(y=optimal_reachability, color='red', linestyle='--', linewidth=2, alpha=0.8, zorder=10, label=f'Optimal Reachability = {optimal_reachability:.2f}')
 
     plt.legend()
     plt.grid()

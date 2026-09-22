@@ -249,7 +249,7 @@ if __name__ == "__main__":
 
     # Non-default variants write to their own paths so their output does not
     # overwrite a run of the default learner on the same model and iteration.
-    tag = "" if args.variant is Variant.CURRENT else f"_{args.variant.value.replace('-', '_')}"
+    tag = f"_{args.variant.value}"
 
     jani_file_path = f"./mdp_models/{args.mpd_model}.v{args.version}.jani"
     analysis_path = f"./results/{args.mpd_model.replace('.', '_')}_analysis_{args.iteration}{tag}"

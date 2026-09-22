@@ -11,18 +11,20 @@ import subprocess
 import argparse
 from datetime import datetime
 
+from variants import variant_names, variant_help
+
 
 # List of benchmark parameters: (job_name, mdp_name, version, confidence_error, minimum_transition_probability, min_num_iterations, max_num_iterations, convergence_threshold, num_policy_accuracy_sims)
 BENCHMARK_CONFIGS = [
-    ("consensus_2", "consensus.2", "1", 0.01, 0.5, 5, 100, 0.0005, 1000),
-    ("csma_2-2", "csma.2-2", "1", 0.01, 0.25, 5, 50, 0.001, 200),
-    ("firewire_abst", "firewire_abst", "1", 0.01, 0.5, 5, 100, 0.0005, 1000),
-    ("ij_10", "ij.10", "1", 0.01, 0.5, 5, 50, 0.0005, 1000),
-    ("ij_3", "ij.3", "1", 0.01, 0.5, 5, 100, 0.0001, 1000),
-    ("pacman", "pacman", "2", 0.01, 0.08, 5, 100, 0.001, 200),
-    ("philosophers_mdp_3", "philosophers-mdp.3", "1", 0.01, 0.5, 5, 100, 0.0005, 1000),
-    ("rabin_3", "rabin.3", "1", 0.01, 0.03125, 5, 100, 0.0005, 1000),
-    ("zeroconf", "zeroconf", "1", 0.01, 0.0001025262467191601, 5, 100, 0.0005, 100),
+    ("consensus_2", "consensus.2", "1", 0.01, 0.5, 15, 100, 0.0005, 1000),
+    ("csma_2-2", "csma.2-2", "1", 0.01, 0.25, 15, 50, 0.001, 200),
+    ("firewire_abst", "firewire_abst", "1", 0.01, 0.5, 15, 100, 0.0005, 1000),
+    ("ij_10", "ij.10", "1", 0.01, 0.5, 15, 50, 0.0005, 1000),
+    ("ij_3", "ij.3", "1", 0.01, 0.5, 15, 100, 0.0001, 1000),
+    ("pacman", "pacman", "2", 0.01, 0.08, 15, 100, 0.001, 200),
+    ("philosophers_mdp_3", "philosophers-mdp.3", "1", 0.01, 0.5, 15, 100, 0.0005, 1000),
+    ("rabin_3", "rabin.3", "1", 0.01, 0.03125, 15, 100, 0.0005, 1000),
+    ("zeroconf", "zeroconf", "1", 0.01, 0.0001025262467191601, 15, 100, 0.0005, 100),
 ]
 
 
@@ -37,7 +39,8 @@ def create_slurm_script(
     convergence_threshold=0.0005,
     num_policy_accuracy_sims=1000,
     trial=0,
-    account="N/A"
+    account="N/A",
+    variant="optimized"
 ):
     """
     Create a SLURM batch script for a single benchmark job.
@@ -49,6 +52,7 @@ def create_slurm_script(
         confidence_error: Confidence error parameter
         min_transition_prob: Minimum transition probability parameter
         account: SLURM account name
+        variant: Learner variant to run, passed through to main.py -V
     
     Returns:
         Path to the created SLURM script
@@ -72,7 +76,7 @@ module load anaconda3
 conda activate ltl-reachability
 
 # Run the MDP learning benchmark
-python main.py -m {mdp_name} -v {version} -c {confidence_error} -p {min_transition_prob} -n {min_num_iterations} -x {max_num_iterations} -t {convergence_threshold} -a {num_policy_accuracy_sims} -i {trial}
+python main.py -m {mdp_name} -v {version} -c {confidence_error} -p {min_transition_prob} -n {min_num_iterations} -x {max_num_iterations} -t {convergence_threshold} -a {num_policy_accuracy_sims} -i {trial} -V {variant}
 """
     
     script_path = "slurm/jobs/" + script_name
@@ -110,7 +114,7 @@ def submit_job(script_path):
         return None
 
 
-def dispatch_benchmarks(configs=None, dry_run=False, num_trials=1, account=None):
+def dispatch_benchmarks(configs=None, dry_run=False, num_trials=1, account=None, variant="optimized"):
     """
     Dispatch all benchmark jobs.
     
@@ -119,6 +123,7 @@ def dispatch_benchmarks(configs=None, dry_run=False, num_trials=1, account=None)
         dry_run: If True, only print what would be done without submitting.
         num_trials: Number of trials to run for each configuration.
         account: SLURM account name.
+        variant: Learner variant to run, passed through to main.py -V.
     """
     if configs is None:
         configs = BENCHMARK_CONFIGS
@@ -131,11 +136,11 @@ def dispatch_benchmarks(configs=None, dry_run=False, num_trials=1, account=None)
         print(f"  Confidence Error: {confidence_error}, Min Transition Prob: {min_transition_prob}")
 
         for trial in range(1, num_trials + 1):
-            trial_job_name = f"{job_name}_trial{trial}"
+            trial_job_name = f"{job_name}_trial{trial}_{variant}"
             print(f"    Trial {trial}:")
         
             if dry_run:
-                print(f"  [DRY RUN] Would run: python main.py -m {mdp_name} -v {version} -c {confidence_error} -p {min_transition_prob} -n {min_num_iterations} -x {max_num_iterations} -t {convergence_threshold} -a {num_policy_accuracy_sims} -i {trial}")
+                print(f"  [DRY RUN] Would run: python main.py -m {mdp_name} -v {version} -c {confidence_error} -p {min_transition_prob} -n {min_num_iterations} -x {max_num_iterations} -t {convergence_threshold} -a {num_policy_accuracy_sims} -i {trial} -V {variant}")
             else:
                 script_path = create_slurm_script(
                     trial_job_name, 
@@ -148,7 +153,8 @@ def dispatch_benchmarks(configs=None, dry_run=False, num_trials=1, account=None)
                     convergence_threshold, 
                     num_policy_accuracy_sims, 
                     trial,
-                    account
+                    account,
+                    variant
                 )
                 print(f"  Created SLURM script: {script_path}")
                 
@@ -191,6 +197,14 @@ def main():
         required=True,
         help="SLURM account name (required)"
     )
+    parser.add_argument(
+        "-V",
+        "--variant",
+        type=str,
+        default="optimized",
+        choices=variant_names(),
+        help="Which learner variant to run (default: 'optimized'). " + variant_help()
+    )
     
     args = parser.parse_args()
     
@@ -207,11 +221,12 @@ def main():
     print("=" * 70)
     print(f"Total jobs to submit: {len(configs)}")
     print(f"Account: {args.account}")
+    print(f"Variant: {args.variant}")
     if args.dry_run:
         print("[DRY RUN MODE] - No jobs will be submitted")
     print("=" * 70)
     
-    submitted_jobs = dispatch_benchmarks(configs, dry_run=args.dry_run, num_trials=args.num_trials, account=args.account)
+    submitted_jobs = dispatch_benchmarks(configs, dry_run=args.dry_run, num_trials=args.num_trials, account=args.account, variant=args.variant)
     
     print("\n" + "=" * 70)
     if not args.dry_run and submitted_jobs:
