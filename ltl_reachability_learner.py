@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 from mdp import MDP
 from mdp_simulator import MDPSimulator
-from analysis_utils import run_analysis, plot_bvi_history
+from analysis_utils import run_analysis, plot_bvi_history, PolicyRecorder
 from tqdm import tqdm
 import json
 import os
@@ -511,6 +511,9 @@ class LTLReachabilityLearner:
         """
 
         self.learning_history = []
+        # TODO: (Fix) Its policy is keyed on MEC-collapsed super-states, so the churn and
+        # retention plots get captioned with that caveat.
+        policy_recorder = PolicyRecorder(states_collapsed=True)
         prev_collapsed_mdp_MEC_states = dict()  # {super_state: set of states in MEC}
         error = 1
         confidence_error = 1 ### TODO: will update this later in the final algorithm.
@@ -608,6 +611,12 @@ class LTLReachabilityLearner:
                     self.true_error_history.append((k, total_sample_counts, curr_error))
                     del test_mdp  # free memory
 
+                    # The guarantee is on V^{pi_U} - V*, so keep the policy
+                    # this stage extracted from U, not just the bounds. Note the
+                    # states here are MEC-collapsed super-states, whose identity
+                    # can change between rounds.
+                    policy_recorder.record(k, collapsed_discovered_mdp.learned_policy)
+
                     # Run iteration analysis, save plots and data
                     run_analysis(
                         analysis_dir=analysis_dir,
@@ -619,7 +628,8 @@ class LTLReachabilityLearner:
                         max_states=len(self.mdp_sim.gt_mdp.states),
                         max_transitions=sum(len(sat_counts) for sat_counts in self.mdp_sim.gt_mdp.transition_probabilities.values()),
                         true_confidence_error=self.true_confidence_error,
-                        true_p_min=self.true_p_min
+                        true_p_min=self.true_p_min,
+                        policy_recorder=policy_recorder
                     )
 
                 print("Error:", self.learning_history[-1])

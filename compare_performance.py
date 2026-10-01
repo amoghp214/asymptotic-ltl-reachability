@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 from matplotlib import pyplot as plt
 
-from analysis_utils import OPTIMAL_POLICY_REACHABILITY
+from analysis_utils import OPTIMAL_POLICY_REACHABILITY, annotate_collapsed_states
 from variants import variant_names, variant_help
 
 
@@ -69,6 +69,17 @@ def load_variant(analysis_dir, variant):
             except Exception as e:
                 print(f"Warning: could not read {stdev_file} ({e}), plotting without bands.")
 
+        # Policy churn and retention are derived quantities: analyse_performance.py
+        # computes them per trial and writes the medians here, because policies
+        # cannot be averaged back out of analysis_data.json.
+        policy_file = benchmark_dir / 'policy_metrics.json'
+        if policy_file.exists():
+            try:
+                with open(policy_file, 'r') as f:
+                    data.update(json.load(f))
+            except Exception as e:
+                print(f"Warning: could not read {policy_file} ({e}), skipping its policy plots.")
+
         benchmarks[benchmark_dir.name] = data
 
     return benchmarks
@@ -82,7 +93,7 @@ def variant_colors(variants):
 
 def plot_comparison(plot_path, series, history_key, y_index, xlabel, ylabel,
                     title, ylim, colors, x_index=0, optimal_reachability=None,
-                    marker='o'):
+                    marker='o', vline_at=None, vline_label=None, note=None):
     """
     Draw one metric for several variants on a single set of axes.
 
@@ -119,19 +130,24 @@ def plot_comparison(plot_path, series, history_key, y_index, xlabel, ylabel,
                     alpha=0.8, zorder=10,
                     label=f'Optimal Reachability = {optimal_reachability:.2f}')
 
+    if vline_at is not None:
+        plt.axvline(x=vline_at, color='green', linestyle=':', linewidth=2, label=vline_label)
+
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.ylim(*ylim)
     plt.title(title)
     plt.legend()
     plt.grid()
+    if note:
+        annotate_collapsed_states(note)
     plt.savefig(plot_path)
     plt.close()
 
 
 def plot_comparison_w_stdev(plot_path, series, history_key, y_index, stdev_key,
                             xlabel, ylabel, title, ylim, colors, x_index=0,
-                            optimal_reachability=None):
+                            optimal_reachability=None, vline_at=None, vline_label=None, note=None):
     """
     Same as plot_comparison, with each variant's across-trial stdev shaded.
 
@@ -176,12 +192,17 @@ def plot_comparison_w_stdev(plot_path, series, history_key, y_index, stdev_key,
                     alpha=0.8, zorder=10,
                     label=f'Optimal Reachability = {optimal_reachability:.2f}')
 
+    if vline_at is not None:
+        plt.axvline(x=vline_at, color='green', linestyle=':', linewidth=2, label=vline_label)
+
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.ylim(*ylim)
     plt.title(title)
     plt.legend()
     plt.grid()
+    if note:
+        annotate_collapsed_states(note)
     plt.savefig(plot_path)
     plt.close()
 
@@ -252,6 +273,45 @@ def compare_benchmark(output_dir, benchmark_name, series):
 
     optimal_reachability = OPTIMAL_POLICY_REACHABILITY.get(benchmark_name)
 
+    # Where p_k reaches the true p_min. It is a property of the benchmark, not of
+    # the variant, so the first variant that recorded it speaks for all of them.
+    p_min_stage_k, p_min_label = None, None
+    for _, data in series:
+        if data.get('p_min_stage_k') is not None:
+            p_min_stage_k = int(data['p_min_stage_k'])
+            p_min_label = f"p_k <= p_min at k={p_min_stage_k}"
+            if data.get('p_min_projected'):
+                p_min_label += " (projected)"
+            break
+
+    # Several variants share these axes, so the caveat names the ones it is about.
+    collapsed_variants = [variant for variant, data in series
+                          if data.get('policy_states_collapsed')]
+    collapsed_note = None
+    if collapsed_variants:
+        verb, curve = ("keys", "that curve") if len(collapsed_variants) == 1 else ("key", "those curves")
+        collapsed_note = (f"Note: {', '.join(collapsed_variants)} {verb} the policy on MEC-collapsed "
+                          "super-states, whose identity can change between stages.\n"
+                          f"Churn and retention are indicative only for {curve}.")
+
+    def policy_note(history_key):
+        """The caveat, on the policy plots only."""
+        if history_key in ('policy_churn_history', 'policy_retention_history'):
+            return collapsed_note
+        return None
+
+    def p_min_vline(history_key, x_index):
+        """The marker's x position: the stage itself, or its sample count."""
+        if p_min_stage_k is None or history_key != 'policy_retention_history':
+            return None
+        if x_index == 0:
+            return p_min_stage_k
+        for _, data in series:
+            for row in data.get(history_key, []):
+                if int(row[0]) == p_min_stage_k:
+                    return row[1]
+        return None
+
     # (filename, history key, y column, x column, x label, y label, title, ylim, V* line)
     plots = [
         ("error_vs_k.png", 'learning_history', -3, 0,
@@ -276,6 +336,18 @@ def compare_benchmark(output_dir, benchmark_name, series):
         ("policy_accuracy_vs_samples.png", 'policy_accuracy_history', -1, 1,
          "Number of Samples", "Policy Accuracy (Reachability)",
          "Policy Accuracy (Reachability) vs Number of Samples", (-0.1, 1.1), optimal_reachability),
+        ("policy_churn_vs_k.png", 'policy_churn_history', -1, 0,
+         "Iteration", "Fraction of States with Changed Action",
+         "Policy Churn Between Consecutive Stages", (-0.1, 1.1), None),
+        ("policy_churn_vs_samples.png", 'policy_churn_history', -1, 1,
+         "Number of Samples", "Fraction of States with Changed Action",
+         "Policy Churn vs Number of Samples", (-0.1, 1.1), None),
+        ("policy_retention_vs_k.png", 'policy_retention_history', -1, 0,
+         "Iteration", "Fraction of p_min-Stage Actions Kept",
+         "Retention of p_min-Stage Actions", (-0.1, 1.1), None),
+        ("policy_retention_vs_samples.png", 'policy_retention_history', -1, 1,
+         "Number of Samples", "Fraction of p_min-Stage Actions Kept",
+         "Retention of p_min-Stage Actions vs Number of Samples", (-0.1, 1.1), None),
     ]
 
     for filename, history_key, y_index, x_index, xlabel, ylabel, title, ylim, optimal in plots:
@@ -291,6 +363,9 @@ def compare_benchmark(output_dir, benchmark_name, series):
             ylim=ylim,
             colors=colors,
             optimal_reachability=optimal,
+            vline_at=p_min_vline(history_key, x_index),
+            vline_label=p_min_label,
+            note=policy_note(history_key),
         )
 
     # (filename, history key, y column, stdev key, x column, x label, y label, title, V* line)
@@ -305,6 +380,19 @@ def compare_benchmark(output_dir, benchmark_name, series):
         ("policy_accuracy_w_std_vs_samples.png", 'policy_accuracy_history', -1,
          'policy_accuracy_stdev_history', 1, "Number of Samples", "Policy Accuracy (Reachability)",
          "Policy Accuracy (Reachability) vs Number of Samples", optimal_reachability),
+        ("policy_churn_w_std_vs_k.png", 'policy_churn_history', -1, 'policy_churn_stdev_history', 0,
+         "Iteration", "Fraction of States with Changed Action",
+         "Policy Churn Between Consecutive Stages", None),
+        ("policy_churn_w_std_vs_samples.png", 'policy_churn_history', -1, 'policy_churn_stdev_history', 1,
+         "Number of Samples", "Fraction of States with Changed Action",
+         "Policy Churn vs Number of Samples", None),
+        ("policy_retention_w_std_vs_k.png", 'policy_retention_history', -1,
+         'policy_retention_stdev_history', 0, "Iteration", "Fraction of p_min-Stage Actions Kept",
+         "Retention of p_min-Stage Actions", None),
+        ("policy_retention_w_std_vs_samples.png", 'policy_retention_history', -1,
+         'policy_retention_stdev_history', 1, "Number of Samples",
+         "Fraction of p_min-Stage Actions Kept",
+         "Retention of p_min-Stage Actions vs Number of Samples", None),
     ]
 
     for filename, history_key, y_index, stdev_key, x_index, xlabel, ylabel, title, optimal in stdev_plots:
@@ -321,6 +409,9 @@ def compare_benchmark(output_dir, benchmark_name, series):
             ylim=(-0.1, 1.1),
             colors=colors,
             optimal_reachability=optimal,
+            vline_at=p_min_vline(history_key, x_index),
+            vline_label=p_min_label,
+            note=policy_note(history_key),
         )
 
     plot_value_bounds_comparison(

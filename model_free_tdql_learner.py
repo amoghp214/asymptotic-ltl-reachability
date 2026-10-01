@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 from mdp import MDP
 from mdp_simulator import MDPSimulator
-from analysis_utils import run_analysis
+from analysis_utils import run_analysis, PolicyRecorder
 from tqdm import tqdm
 import json
 import os
@@ -1138,6 +1138,7 @@ class ModelFreeTDQLearner:
         """
 
         self.learning_history = []
+        policy_recorder = PolicyRecorder()
         prev_collapsed_mdp_MEC_states = dict()  # {super_state: set of states in MEC}
         error = 1
         confidence_error = 1 ### TODO: will update this later in the final algorithm.
@@ -1191,6 +1192,10 @@ class ModelFreeTDQLearner:
                     )
                     print("Policy accuracy:", self.policy_accuracy_history[-1][-1])
 
+                    # The guarantee is on V^{pi_U} - V*, so keep the policy
+                    # this stage extracted from U, not just the bounds.
+                    policy_recorder.record(k, policy_k)
+
                     # Run iteration analysis, save plots and data
                     run_analysis(
                         analysis_dir=analysis_dir,
@@ -1202,7 +1207,8 @@ class ModelFreeTDQLearner:
                         max_states=len(self.mdp_sim.gt_mdp.states),
                         max_transitions=sum(len(sat_counts) for sat_counts in self.mdp_sim.gt_mdp.transition_probabilities.values()),
                         true_confidence_error=self.true_confidence_error,
-                        true_p_min=self.true_p_min
+                        true_p_min=self.true_p_min,
+                        policy_recorder=policy_recorder
                     )
 
                 print("Error:", self.learning_history[-1])

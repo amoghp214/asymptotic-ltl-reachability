@@ -7,7 +7,9 @@ from collections import defaultdict
 from matplotlib import pyplot as plt
 import numpy as np
 
-from analysis_utils import run_analysis, OPTIMAL_POLICY_REACHABILITY
+from analysis_utils import (run_analysis, OPTIMAL_POLICY_REACHABILITY, policy_snapshots,
+                            p_min_stage, projected_p_min_stage, compute_policy_metrics,
+                            annotate_collapsed_states, COLLAPSED_STATES_NOTE)
 
 def load_analysis_data(file_path):
     """Load analysis data from JSON file."""
@@ -64,6 +66,26 @@ def get_benchmark_medians(benchmark_data):
     benchmark_metrics['transitions_seen_history'] = get_median_list(transitions_seen_histories)
     benchmark_metrics['policy_accuracy_history'] = get_median_list(policy_accuracy_histories)
     benchmark_metrics['true_error_history'] = get_median_list(true_error_histories)
+
+    # Churn and retention are derived per trial before they can be medianed;
+    # policies themselves do not average. Absent for runs made before policies
+    # were recorded, in which case these stay empty and nothing plots them.
+    churn_histories, retention_histories, nonmonotone_histories = [], [], []
+    for trial_data in benchmark_data.values():
+        churn_rows, retention_rows, nonmonotone_rows = compute_policy_metrics(trial_data)
+        if churn_rows:
+            churn_histories.append(churn_rows)
+        if retention_rows:
+            retention_histories.append(retention_rows)
+        if nonmonotone_rows:
+            nonmonotone_histories.append(nonmonotone_rows)
+
+    benchmark_metrics['policy_churn_history'] = get_median_list(churn_histories)
+    benchmark_metrics['policy_retention_history'] = get_median_list(retention_histories)
+    benchmark_metrics['policy_nonmonotone_history'] = get_median_list(nonmonotone_histories)
+    benchmark_metrics['p_min_stage_k'], benchmark_metrics['p_min_projected'] = \
+        projected_p_min_stage(reference_trial)
+    benchmark_metrics['policy_states_collapsed'] = reference_trial.get('policy_states_collapsed', False)
 
     return benchmark_metrics
 
@@ -144,7 +166,12 @@ def plot_results(results, output_dir='./analysis/'):
             max_states=benchmark_results['max_states'],
             max_transitions=benchmark_results['max_transitions'],
             true_confidence_error=benchmark_results['true_confidence_error'],
-            true_p_min=benchmark_results['true_p_min']
+            true_p_min=benchmark_results['true_p_min'],
+            policy_churn_history=benchmark_results['policy_churn_history'],
+            policy_retention_history=benchmark_results['policy_retention_history'],
+            p_min_stage_k=benchmark_results['p_min_stage_k'],
+            p_min_projected=benchmark_results['p_min_projected'],
+            policy_states_collapsed=benchmark_results['policy_states_collapsed']
         )
         
         print(f"{benchmark_name} plots saved to {output_path}")
@@ -237,7 +264,8 @@ def draw_stdev_band(ax, x, y, stdevs, log_scale=False):
 def plot_history_w_stdev(analysis_dir, history, stdev_history, value_index,
                          vs_k_filename, vs_samples_filename, ylabel,
                          vs_k_title, vs_samples_title, ylim=(-0.1, 1.1),
-                         optimal_reachability=None, log_scale=False):
+                         optimal_reachability=None, log_scale=False,
+                         vline_k=None, vline_label=None, states_collapsed=False):
     """
     Plot one metric against k and against sample count, with the stdev shaded.
 
@@ -251,6 +279,12 @@ def plot_history_w_stdev(analysis_dir, history, stdev_history, value_index,
         ylim (tuple): (bottom, top) for the y axis.
         optimal_reachability (float or None): If given, draw the V* line.
         log_scale (bool): Use a log y axis.
+        vline_k (int or None): Stage to mark with a vertical line; on the samples
+            plot it is placed at that stage's sample count, and skipped when the
+            stage is beyond the recorded history.
+        vline_label (str or None): Legend text for that line.
+        states_collapsed (bool): Caption the figure with the MEC-collapsed-states
+            caveat, for a learner whose policy is keyed on super-states.
     """
     arr = np.array(history, dtype=float)
     if arr.size == 0:
@@ -263,9 +297,14 @@ def plot_history_w_stdev(analysis_dir, history, stdev_history, value_index,
     stdev_map = {int(k): float(s) for k, s in stdev_history}
     stdevs = np.array([stdev_map.get(int(k), 0.0) for k in arr[:, 0]], dtype=float)
 
-    for filename, x_values, xlabel, title in (
-        (vs_k_filename, arr[:, 0], "Iteration", vs_k_title),
-        (vs_samples_filename, arr[:, 1], "Number of Samples", vs_samples_title),
+    # On the samples axis the marker sits at that stage's sample count, which is
+    # only known if the stage is in the recorded history.
+    vline_samples = next((row[1] for row in history if int(row[0]) == vline_k), None) \
+        if vline_k is not None else None
+
+    for filename, x_values, xlabel, title, vline_at in (
+        (vs_k_filename, arr[:, 0], "Iteration", vs_k_title, vline_k),
+        (vs_samples_filename, arr[:, 1], "Number of Samples", vs_samples_title, vline_samples),
     ):
         plt.figure()
         if log_scale:
@@ -283,10 +322,16 @@ def plot_history_w_stdev(analysis_dir, history, stdev_history, value_index,
                         label=f'Optimal Reachability = {optimal_reachability:.2f}')
             plt.legend()
 
+        if vline_at is not None:
+            plt.axvline(x=vline_at, color='green', linestyle=':', linewidth=2, label=vline_label)
+            plt.legend()
+
         plt.xlabel(xlabel)
         plt.ylabel(ylabel)
         plt.title(title)
         plt.grid()
+        if states_collapsed:
+            annotate_collapsed_states()
         plt.savefig(os.path.join(analysis_dir, filename))
         plt.close()
 
@@ -343,6 +388,115 @@ def plot_policy_accuracy_stdev_curve(final_results, raw_results, output_dir='./a
             optimal_reachability=OPTIMAL_POLICY_REACHABILITY.get(benchmark_name),
         )
 
+def plot_policy_churn_stdev_curve(final_results, raw_results, output_dir='./analysis/'):
+    """Policy churn vs k and vs samples, with the across-trial stdev shaded."""
+    for benchmark_name in final_results.keys():
+        policy_churn_history = final_results[benchmark_name].get('policy_churn_history', [])
+        if not policy_churn_history:
+            continue
+
+        output_path = Path(output_dir) / benchmark_name
+        output_path.mkdir(parents=True, exist_ok=True)
+        analysis_dir = str(output_path)
+
+        # calculate stdev of policy churn at each iteration across trials
+        churn_stdev_history = compute_policy_stdev_history(
+            raw_results, benchmark_name, 'policy_churn_history', policy_churn_history)
+        save_stdev_data(analysis_dir, 'policy_churn_stdev_history', churn_stdev_history)
+
+        plot_history_w_stdev(
+            analysis_dir=analysis_dir,
+            history=policy_churn_history,
+            stdev_history=churn_stdev_history,
+            value_index=-1,
+            vs_k_filename="policy_churn_w_std_vs_k.png",
+            vs_samples_filename="policy_churn_w_std_vs_samples.png",
+            ylabel="Fraction of States with Changed Action",
+            vs_k_title="Policy Churn Between Consecutive Stages",
+            vs_samples_title="Policy Churn vs Number of Samples",
+            states_collapsed=final_results[benchmark_name].get('policy_states_collapsed', False),
+        )
+
+
+def plot_policy_retention_stdev_curve(final_results, raw_results, output_dir='./analysis/'):
+    """Retention of the p_min-stage actions, with the across-trial stdev shaded."""
+    for benchmark_name in final_results.keys():
+        policy_retention_history = final_results[benchmark_name].get('policy_retention_history', [])
+        if not policy_retention_history:
+            continue
+
+        output_path = Path(output_dir) / benchmark_name
+        output_path.mkdir(parents=True, exist_ok=True)
+        analysis_dir = str(output_path)
+        p_min_stage_k = final_results[benchmark_name].get('p_min_stage_k')
+        p_min_label = None
+        if p_min_stage_k is not None:
+            p_min_label = f"p_k <= p_min at k={p_min_stage_k}"
+            if final_results[benchmark_name].get('p_min_projected'):
+                p_min_label += " (projected)"
+
+        # calculate stdev of retention at each iteration across trials
+        retention_stdev_history = compute_policy_stdev_history(
+            raw_results, benchmark_name, 'policy_retention_history', policy_retention_history)
+        save_stdev_data(analysis_dir, 'policy_retention_stdev_history', retention_stdev_history)
+
+        # The non-monotonicity series is recorded for reference but not plotted:
+        # it answers the same question the retention curve already shows.
+        nonmonotone_history = final_results[benchmark_name].get('policy_nonmonotone_history', [])
+        if nonmonotone_history:
+            save_stdev_data(analysis_dir, 'policy_nonmonotone_stdev_history',
+                            compute_policy_stdev_history(raw_results, benchmark_name,
+                                                         'policy_nonmonotone_history', nonmonotone_history))
+
+        with open(os.path.join(analysis_dir, 'policy_metrics.json'), 'w') as f:
+            json.dump({'policy_churn_history': final_results[benchmark_name].get('policy_churn_history', []),
+                       'policy_retention_history': policy_retention_history,
+                       'policy_nonmonotone_history': nonmonotone_history,
+                       'p_min_stage_k': p_min_stage_k,
+                       'p_min_projected': final_results[benchmark_name].get('p_min_projected', False),
+                       'policy_states_collapsed': final_results[benchmark_name].get('policy_states_collapsed', False)},
+                      f, indent=2)
+
+        plot_history_w_stdev(
+            analysis_dir=analysis_dir,
+            history=policy_retention_history,
+            stdev_history=retention_stdev_history,
+            value_index=-1,
+            vs_k_filename="policy_retention_w_std_vs_k.png",
+            vs_samples_filename="policy_retention_w_std_vs_samples.png",
+            ylabel="Fraction of p_min-Stage Actions Kept",
+            vs_k_title="Retention of p_min-Stage Actions",
+            vs_samples_title="Retention of p_min-Stage Actions vs Number of Samples",
+            vline_k=p_min_stage_k,
+            vline_label=p_min_label,
+            states_collapsed=final_results[benchmark_name].get('policy_states_collapsed', False),
+        )
+
+
+def compute_policy_stdev_history(raw_results, benchmark_name, metric_key, median_history):
+    """
+    Stdev of a derived policy metric across trials, aligned to the median curve.
+
+    compute_stdev_history reads a history straight off each trial; these are
+    derived, so each trial's rows are computed first and fed through the same
+    helper.
+    """
+    per_trial = dict()
+    for trial_number, trial_data in raw_results.get(benchmark_name, {}).items():
+        churn_rows, retention_rows, nonmonotone_rows = compute_policy_metrics(trial_data)
+        rows = {'policy_churn_history': churn_rows,
+                'policy_retention_history': retention_rows,
+                'policy_nonmonotone_history': nonmonotone_rows}[metric_key]
+        if rows:
+            per_trial[trial_number] = {metric_key: rows}
+
+    stdev_history = compute_stdev_history({benchmark_name: per_trial}, benchmark_name,
+                                          metric_key, -1, len(median_history))
+    # compute_stdev_history numbers its points from 1; these curves can start at
+    # a later stage, so realign them onto the stage numbers actually plotted.
+    return [(int(median_history[i][0]), stdev) for i, (_, stdev) in enumerate(stdev_history)]
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Aggregate and plot benchmark analysis results.")
     parser.add_argument("-V", "--variant", type=str, default="",
@@ -358,6 +512,8 @@ if __name__ == '__main__':
 
     plot_error_stdev_curve(final_results, raw_results, output_dir=output_dir)
     plot_policy_accuracy_stdev_curve(final_results, raw_results, output_dir=output_dir)
+    plot_policy_churn_stdev_curve(final_results, raw_results, output_dir=output_dir)
+    plot_policy_retention_stdev_curve(final_results, raw_results, output_dir=output_dir)
 
     
     # if final_results:
