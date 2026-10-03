@@ -237,28 +237,22 @@ def save_stdev_data(analysis_dir, key, stdev_history):
         json.dump(stdev_data, f, indent=2)
 
 
-def draw_stdev_band(ax, x, y, stdevs, log_scale=False):
-    """Shade y +/- stdev, colouring each segment by how large the stdev is."""
+def draw_stdev_band(ax, x, y, stdevs, log_scale=False, color=None):
+    """Shade y +/- stdev in a single colour (the plotted line's, by default)."""
     upper = y + stdevs
     lower = y - stdevs
     if log_scale:
         # avoid non-positive values for log scale
         lower = np.maximum(lower, 1e-12)
 
-    cmap = plt.get_cmap('viridis')
-    max_s = stdevs.max() if len(stdevs) > 0 else 0.0
-    if max_s == 0:
-        colors = [cmap(0.5)] * max(1, len(stdevs))
-    else:
-        colors = [cmap(val / max_s) for val in stdevs]
+    if color is None:
+        color = ax.get_lines()[-1].get_color() if ax.get_lines() else 'C0'
 
-    # fill per-segment so colour can vary with stdev
-    for i in range(len(x) - 1):
-        ax.fill_between([x[i], x[i + 1]], [lower[i], lower[i + 1]], [upper[i], upper[i + 1]],
-                        color=colors[i], alpha=0.3, linewidth=0)
     if len(x) == 1:
         ax.fill_between([x[0] - 0.5, x[0] + 0.5], [lower[0], lower[0]], [upper[0], upper[0]],
-                        color=colors[0], alpha=0.3, linewidth=0)
+                        color=color, alpha=0.3, linewidth=0)
+    else:
+        ax.fill_between(x, lower, upper, color=color, alpha=0.3, linewidth=0)
 
 
 def plot_history_w_stdev(analysis_dir, history, stdev_history, value_index,
